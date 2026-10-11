@@ -881,6 +881,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_advanced" = "Advanced";
 "lng_settings_xenon" = "Xenon settings";
 "lng_settings_xenon_empty" = "Nothing here";
+"lng_settings_xenon_unread_on_top" = "Keep unread chats on top";
+"lng_settings_xenon_unread_on_top_about" = "Chats with unmuted unread messages, marks, mentions and reactions stay right below pinned chats until you read them.";
+"lng_settings_xenon_unread_on_top_archive" = "Also show archived chats";
+"lng_settings_xenon_unread_on_top_archive_about" = "Unread archived chats are also shown on top of the main chats list.";
 "lng_settings_stickers_emoji" = "Stickers and emoji";
 "lng_settings_messages" = "Messages";
 "lng_settings_themes" = "Themes";

@@ -60,9 +60,18 @@ base::options::toggle OptionUnreadOnTop({
 		"pinned ones and keep them there until you read them.",
 });
 
+base::options::toggle OptionUnreadOnTopIncludeArchive({
+	.id = kOptionDialogsUnreadOnTopIncludeArchive,
+	.name = "Also show archived chats on top",
+	.description = "Unread archived chats are shown on top of the main "
+		"chats list while they have unmuted unread messages.",
+});
+
 } // namespace
 
 const char kOptionDialogsUnreadOnTop[] = "dialogs-unread-on-top";
+const char kOptionDialogsUnreadOnTopIncludeArchive[]
+	= "dialogs-unread-on-top-include-archive";
 
 BadgesState BadgesForUnread(
 		const UnreadState &state,
@@ -274,7 +283,9 @@ void Entry::notifyUnreadStateChange(const UnreadState &wasState) {
 	Expects(inChatList());
 
 	const auto nowState = chatListUnreadState();
-	owner().chatsListFor(this)->unreadStateChanged(wasState, nowState);
+	if (!owner().ensureChatListPlacement(this, &wasState)) {
+		owner().chatsListFor(this)->unreadStateChanged(wasState, nowState);
+	}
 	auto &filters = owner().chatsFilters();
 	for (const auto &[filterId, links] : _chatListLinks) {
 		if (filterId) {

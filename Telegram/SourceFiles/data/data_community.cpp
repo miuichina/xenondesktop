@@ -243,10 +243,9 @@ void CommunityInfo::collapsedChanged() {
 			const base::flat_set<not_null<History*>> &from) {
 		for (const auto &history : from) {
 			if (history->inChatList()) {
-				const auto wasList = _collapsedInChatLists
-					? chatsList()
-					: owner.chatsList(history->folder());
-				history->removeFromChatList(0, wasList);
+				history->removeFromChatList(
+					0,
+					owner.currentChatListOf(history));
 				moved.emplace(history);
 			}
 		}

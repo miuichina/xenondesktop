@@ -375,7 +375,9 @@ int Folder::fixedOnTopIndex() const {
 }
 
 bool Folder::shouldBeInChatList() const {
-	return !_chatsList.empty() || (_storiesCount > 0);
+	return !_chatsList.empty()
+		|| (_storiesCount > 0)
+		|| owner().hasArchivedOnTop();
 }
 
 Dialogs::UnreadState Folder::chatListUnreadState() const {

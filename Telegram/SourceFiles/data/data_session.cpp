@@ -380,6 +380,15 @@ Session::Session(not_null<Main::Session*> session)
 	unreadOnTop.changes() | rpl::on_next([=, &unreadOnTop] {
 		_dialogsUnreadOnTop = unreadOnTop.value();
 		refreshChatListUnreadOnTop();
+		refreshArchivedOnTop();
+	}, _lifetime);
+
+	const auto &unreadOnTopArchive = base::options::lookup<bool>(
+		Dialogs::kOptionDialogsUnreadOnTopIncludeArchive);
+	_dialogsUnreadOnTopIncludeArchive = unreadOnTopArchive.value();
+	unreadOnTopArchive.changes() | rpl::on_next([=, &unreadOnTopArchive] {
+		_dialogsUnreadOnTopIncludeArchive = unreadOnTopArchive.value();
+		refreshArchivedOnTop();
 	}, _lifetime);
 
 	_chatsFilters->changed(
@@ -2773,20 +2782,22 @@ void Session::setChatPinned(
 
 	const auto list = (filterId
 		? chatsFilters().chatsList(filterId)
-		: chatsListFor(key.entry()))->pinned();
+		: realChatsListFor(key.entry()))->pinned();
 	list->setPinned(key, pinned);
+	ensureChatListPlacement(key.entry());
 	notifyPinnedDialogsOrderUpdated();
 }
 
 void Session::setPinnedFromEntryList(Dialogs::Key key, bool pinned) {
 	Expects(key.entry()->folderKnown());
 
-	const auto list = chatsListFor(key.entry())->pinned();
+	const auto list = realChatsListFor(key.entry())->pinned();
 	if (pinned) {
 		list->addPinned(key);
 	} else {
 		list->setPinned(key, false);
 	}
+	ensureChatListPlacement(key.entry());
 }
 
 void Session::applyPinnedChats(
@@ -2812,6 +2823,7 @@ void Session::applyPinnedChats(
 		});
 	}
 	chatsList(folder)->pinned()->applyList(this, list);
+	refreshArchivedOnTop();
 	notifyPinnedDialogsOrderUpdated();
 }
 
@@ -5647,7 +5659,7 @@ not_null<Folder*> Session::processFolder(const MTPDfolder &data) {
 	return folder(data.vid().v);
 }
 
-not_null<Dialogs::MainList*> Session::chatsListFor(
+not_null<Dialogs::MainList*> Session::realChatsListFor(
 		not_null<Dialogs::Entry*> entry) {
 	if (const auto topic = entry->asTopic()) {
 		return topic->forum()->topicsList();
@@ -5662,6 +5674,165 @@ not_null<Dialogs::MainList*> Session::chatsListFor(
 		}
 	}
 	return chatsList(entry->folder());
+}
+
+not_null<Dialogs::MainList*> Session::chatsListFor(
+		not_null<Dialogs::Entry*> entry) {
+	if (const auto history = entry->asHistory()) {
+		if (needsArchivedOnTop(history)) {
+			return &_chatsList;
+		}
+	}
+	return realChatsListFor(entry);
+}
+
+not_null<Dialogs::MainList*> Session::currentChatListOf(
+		not_null<Dialogs::Entry*> entry) {
+	const auto key = Dialogs::Key(entry);
+	const auto target = chatsListFor(entry);
+	if (target->indexed()->contains(key)) {
+		return target;
+	}
+	const auto real = realChatsListFor(entry);
+	if (real->indexed()->contains(key)) {
+		return real;
+	}
+	if (_chatsList.indexed()->contains(key)) {
+		return &_chatsList;
+	}
+	return target;
+}
+
+bool Session::needsArchivedOnTop(not_null<History*> history) {
+	if (!_dialogsUnreadOnTop || !_dialogsUnreadOnTopIncludeArchive) {
+		return false;
+	}
+	if (const auto info = history->communityListInfo()
+		; info
+		&& info->collapsedInChatLists()
+		&& info->channel() != history->peer) {
+		return false;
+	}
+	const auto folder = history->folder();
+	if (!folder || (folder->id() != Folder::kId)) {
+		return false;
+	}
+	if (history->isPinnedDialog(FilterId())) {
+		return false;
+	}
+	return history->hasUnreadUnmutedForSort();
+}
+
+bool Session::ensureChatListPlacement(
+		not_null<Dialogs::Entry*> entry,
+		const Dialogs::UnreadState *was) {
+	if (!entry->inChatList()) {
+		return false;
+	}
+	const auto target = chatsListFor(entry);
+	const auto current = currentChatListOf(entry);
+	if (current == target) {
+		noteChatListPlacement(entry);
+		return false;
+	}
+	if (was) {
+		current->unreadStateChanged(*was, entry->chatListUnreadState());
+	}
+	const auto folderOf = [&](not_null<Dialogs::MainList*> list) -> Folder* {
+		if (list == &_chatsList) {
+			return nullptr;
+		} else if (const auto folder = folderLoaded(Folder::kId)) {
+			if (list == folder->chatsList().get()) {
+				return folder;
+			}
+		}
+		return entry->folder();
+	};
+	const auto oldFolder = folderOf(current);
+	const auto newFolder = folderOf(target);
+	entry->removeFromChatList(0, current);
+	entry->addToChatList(0, target);
+	noteChatListPlacement(entry);
+	entry->updateChatListSortPosition();
+	chatsListChanged(oldFolder);
+	chatsListChanged(newFolder);
+	return true;
+}
+
+void Session::noteChatListPlacement(not_null<Dialogs::Entry*> entry) {
+	const auto history = entry->asHistory();
+	const auto mirrored = history
+		&& history->folder()
+		&& (history->folder()->id() == Folder::kId)
+		&& _chatsList.indexed()->contains(Dialogs::Key(entry));
+	if (!history) {
+		return;
+	}
+	const auto id = history->peer->id;
+	if (mirrored) {
+		if (!ranges::contains(_archivedOnTop, id)) {
+			_archivedOnTop.push_back(id);
+		}
+	} else {
+		for (auto i = begin(_archivedOnTop); i != end(_archivedOnTop); ++i) {
+			if (*i == id) {
+				_archivedOnTop.erase(i);
+				break;
+			}
+		}
+	}
+}
+
+bool Session::hasArchivedOnTop() {
+	const auto valid = [&](PeerId id) {
+		const auto history = historyLoaded(id);
+		return history
+			&& history->folder()
+			&& (history->folder()->id() == Folder::kId)
+			&& history->inChatList()
+			&& _chatsList.indexed()->contains(Dialogs::Key(history));
+	};
+	_archivedOnTop.erase(
+		std::remove_if(
+			begin(_archivedOnTop),
+			end(_archivedOnTop),
+			[&](PeerId id) { return !valid(id); }),
+		end(_archivedOnTop));
+	return !_archivedOnTop.empty();
+}
+
+std::vector<not_null<History*>> Session::archivedOnTopHistories() {
+	auto result = std::vector<not_null<History*>>();
+	if (!hasArchivedOnTop()) {
+		return result;
+	}
+	result.reserve(_archivedOnTop.size());
+	for (const auto id : _archivedOnTop) {
+		if (const auto history = historyLoaded(id)) {
+			result.push_back(not_null(history));
+		}
+	}
+	return result;
+}
+
+void Session::refreshArchivedOnTop() {
+	auto keys = std::vector<Dialogs::Key>();
+	keys.reserve(_chatsList.indexed()->size());
+	for (const auto &row : _chatsList.indexed()->all()) {
+		keys.push_back(row->key());
+	}
+	const auto folder = folderLoaded(Folder::kId);
+	if (folder) {
+		for (const auto &row : folder->chatsList()->indexed()->all()) {
+			keys.push_back(row->key());
+		}
+	}
+	for (const auto &key : keys) {
+		ensureChatListPlacement(key.entry());
+	}
+	if (archivedOnTop() && folder && !folder->chatsList()->loaded()) {
+		session().api().requestDialogs(folder);
+	}
 }
 
 not_null<Dialogs::MainList*> Session::chatsList(Data::Folder *folder) {
@@ -5696,7 +5867,10 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		return;
 	} else if (event.existenceChanged) {
 		const auto mainRow = entry->addToChatList(0, mainList);
+		noteChatListPlacement(entry);
 		_contactsNoChatsList.remove(key, mainRow);
+	} else if (ensureChatListPlacement(entry)) {
+		event.existenceChanged = true;
 	} else {
 		event.moved = entry->adjustByPosInChatList(0, mainList);
 	}
@@ -5784,8 +5958,9 @@ void Session::removeChatListEntry(Dialogs::Key key) {
 			});
 		}
 	}
-	const auto mainList = chatsListFor(entry);
+	const auto mainList = currentChatListOf(entry);
 	entry->removeFromChatList(0, mainList);
+	noteChatListPlacement(entry);
 	_chatListEntryRefreshes.fire(ChatListEntryRefresh{
 		.key = key,
 		.existenceChanged = true

@@ -202,19 +202,38 @@ void AddChatListAction(
 		Fn<not_null<Dialogs::MainList*>()> &&list,
 		const Ui::Menu::MenuCallback &addAction) {
 	// There is no async to make weak from controller.
-	const auto unreadState = (kind == ChatListKind::AllChats)
+	const auto archiveExtra = (kind == ChatListKind::Archive)
+		? [&] {
+			auto result = Dialogs::UnreadState();
+			for (const auto history
+				: controller->session().data().archivedOnTopHistories()) {
+				result += history->chatListUnreadState();
+			}
+			return result;
+		}()
+		: Dialogs::UnreadState();
+	const auto unreadState = ((kind == ChatListKind::AllChats)
 		? Data::MainListMapUnreadState(
 			&controller->session(),
 			list()->unreadState())
-		: list()->unreadState();
+		: list()->unreadState()) + archiveExtra;
 	if (!unreadState.messages && !unreadState.marks && !unreadState.chats) {
 		return;
 	}
 
 	auto callback = [=] {
+		const auto mark = [=] {
+			MarkAsReadChatList(list());
+			if (kind == ChatListKind::Archive) {
+				for (const auto history
+					: controller->session().data().archivedOnTopHistories()) {
+					MarkAsReadThread(history);
+				}
+			}
+		};
 		if (unreadState.messages > kMaxUnreadWithoutConfirmation) {
 			auto boxCallback = [=](Fn<void()> &&close) {
-				MarkAsReadChatList(list());
+				mark();
 				close();
 			};
 			controller->show(
@@ -224,7 +243,7 @@ void AddChatListAction(
 				}),
 				Ui::LayerOption::CloseOther);
 		} else {
-			MarkAsReadChatList(list());
+			mark();
 		}
 	};
 	addAction(

@@ -48,6 +48,7 @@ class IndexedList;
 class MainList;
 
 extern const char kOptionDialogsUnreadOnTop[];
+extern const char kOptionDialogsUnreadOnTopIncludeArchive[];
 
 [[nodiscard]] BadgesState BadgesForUnread(
 	const UnreadState &state,
@@ -132,6 +133,7 @@ public:
 			? computeSortPosition(filterId)
 			: _sortKeyInChatList;
 	}
+	[[nodiscard]] bool hasUnreadUnmutedForSort() const;
 	void updateChatListSortPosition();
 	void setChatListTimeId(TimeId date);
 	virtual void updateChatListExistence();
@@ -202,7 +204,6 @@ private:
 	virtual void changedChatListPinHook();
 	void pinnedIndexChanged(FilterId filterId, int was, int now);
 	[[nodiscard]] uint64 computeSortPosition(FilterId filterId) const;
-	[[nodiscard]] bool hasUnreadUnmutedForSort() const;
 
 	void setChatListExistence(bool exists);
 	not_null<Row*> mainChatListLink(FilterId filterId) const;

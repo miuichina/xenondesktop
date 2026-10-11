@@ -955,6 +955,21 @@ public:
 	[[nodiscard]] bool dialogsUnreadOnTop() const {
 		return _dialogsUnreadOnTop;
 	}
+	[[nodiscard]] not_null<Dialogs::MainList*> realChatsListFor(
+		not_null<Dialogs::Entry*> entry);
+	[[nodiscard]] not_null<Dialogs::MainList*> currentChatListOf(
+		not_null<Dialogs::Entry*> entry);
+	[[nodiscard]] bool archivedOnTop() const {
+		return _dialogsUnreadOnTop && _dialogsUnreadOnTopIncludeArchive;
+	}
+	[[nodiscard]] bool needsArchivedOnTop(not_null<History*> history);
+	bool ensureChatListPlacement(
+		not_null<Dialogs::Entry*> entry,
+		const Dialogs::UnreadState *was = nullptr);
+	void refreshArchivedOnTop();
+	void noteChatListPlacement(not_null<Dialogs::Entry*> entry);
+	[[nodiscard]] bool hasArchivedOnTop();
+	[[nodiscard]] std::vector<not_null<History*>> archivedOnTopHistories();
 	[[nodiscard]] auto chatListEntryRefreshes() const
 		-> rpl::producer<ChatListEntryRefresh>;
 
@@ -1263,6 +1278,8 @@ private:
 	Dialogs::IndexedList _contactsList;
 	Dialogs::IndexedList _contactsNoChatsList;
 	bool _dialogsUnreadOnTop = false;
+	bool _dialogsUnreadOnTopIncludeArchive = false;
+	std::vector<PeerId> _archivedOnTop;
 
 	MsgId _localMessageIdCounter = StartClientMsgId;
 	std::unordered_map<PeerId, Messages> _messages;
