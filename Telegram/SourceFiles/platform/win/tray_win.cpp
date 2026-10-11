@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <private/qhighdpiscaling_p.h>
 #include <QSvgRenderer>
 #include <QBuffer>
+#include <QtCore/QOperatingSystemVersion>
 
 namespace Platform {
 

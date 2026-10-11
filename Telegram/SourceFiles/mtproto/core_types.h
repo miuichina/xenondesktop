@@ -69,7 +69,7 @@ constexpr int GetDcIdShift(ShiftedDcId shiftedDcId) {
 
 } // namespace MTP
 
-enum {
+enum : mtpTypeId {
 	// core types
 	mtpc_int = tl::id_int,
 	mtpc_long = tl::id_long,
