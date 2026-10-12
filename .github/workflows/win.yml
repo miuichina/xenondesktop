@@ -47,6 +47,35 @@ jobs:
           sdk: 10.0.26100.0
           toolset: '14.44'
 
+      - name: Install ATL (breakpad dump_syms)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installs = @(& $vswhere -latest -products * -property installationPath)
+          $vsPath = $installs | Where-Object { Test-Path (Join-Path $_ 'VC\Tools\MSVC\14.44.35207') } | Select-Object -First 1
+          if (!$vsPath) { $vsPath = $installs | Select-Object -First 1 }
+          if (!$vsPath) { throw 'vswhere: VS installation not found' }
+          Write-Host "VS path: $vsPath"
+          $legacyDir = Join-Path $vsPath 'VC\atlmfc\include'
+          $toolsetDir = Join-Path $vsPath 'VC\Tools\MSVC\14.44.35207\atlmfc\include'
+          if (!(Test-Path (Join-Path $legacyDir 'atlbase.h')) -or !(Test-Path (Join-Path $toolsetDir 'atlbase.h'))) {
+            $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            if (!(Test-Path $installer)) { throw "vs_installer not found: $installer" }
+            & $installer modify --installPath "$vsPath" --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart --nocache --includeRecommended
+            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { exit $LASTEXITCODE }
+          } else {
+            Write-Host 'ATL already present for toolset 14.44'
+          }
+          $realDir = @($legacyDir, $toolsetDir) | Where-Object { Test-Path (Join-Path $_ 'atlbase.h') } | Select-Object -First 1
+          if (!$realDir) { throw 'ATL headers still missing after install' }
+          Write-Host "Using ATL include: $realDir"
+          if (!(Test-Path (Join-Path $legacyDir 'atlbase.h'))) {
+            Write-Host "Populating legacy ATL include dir: $legacyDir"
+            New-Item -ItemType Directory -Force $legacyDir | Out-Null
+            Copy-Item -Path (Join-Path $realDir '*') -Destination $legacyDir -Recurse -Force
+          }
+          "INCLUDE=$realDir;$legacyDir;$env:INCLUDE" >> $env:GITHUB_ENV
+
       - name: Restore dependencies
         id: dependencies
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
