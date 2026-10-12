@@ -40,41 +40,32 @@ jobs:
           $key = '${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py') }}'
           "DEPENDENCY_KEY=windows-x64-msvc144-qt6-release-v1-$key" >> $env:GITHUB_ENV
 
+      - name: Install ATL for MSVC 14.44
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64 -property installationPath
+          if (!$vsPath) { throw 'Visual Studio with MSVC 14.44 not found' }
+          $toolset = Get-ChildItem "$vsPath\VC\Tools\MSVC" -Directory | Where-Object Name -Like '14.44.*' | Sort-Object Name -Descending | Select-Object -First 1
+          if (!$toolset) { throw 'MSVC 14.44 directory not found' }
+          $atl = Join-Path $toolset.FullName 'atlmfc\include'
+          if (!(Test-Path (Join-Path $atl 'atlbase.h'))) {
+            $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+            $arguments = @('modify', '--installPath', ('"{0}"' -f $vsPath), '--add', 'Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL', '--quiet', '--norestart', '--nocache')
+            $installation = Start-Process -FilePath $installer -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
+            if ($installation.ExitCode -notin @(0, 3010)) { throw "ATL installation failed: $($installation.ExitCode)" }
+          }
+          foreach ($header in @('atlbase.h', 'atlcomcli.h')) {
+            if (!(Test-Path (Join-Path $atl $header))) { throw "ATL header missing: $atl\$header" }
+          }
+          Write-Host "ATL verified: $atl"
+
       - name: MSVC environment
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
         with:
           arch: x64
           sdk: 10.0.26100.0
           toolset: '14.44'
-
-      - name: Install ATL (breakpad dump_syms)
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $installs = @(& $vswhere -latest -products * -property installationPath)
-          $vsPath = $installs | Where-Object { Test-Path (Join-Path $_ 'VC\Tools\MSVC\14.44.35207') } | Select-Object -First 1
-          if (!$vsPath) { $vsPath = $installs | Select-Object -First 1 }
-          if (!$vsPath) { throw 'vswhere: VS installation not found' }
-          Write-Host "VS path: $vsPath"
-          $legacyDir = Join-Path $vsPath 'VC\atlmfc\include'
-          $toolsetDir = Join-Path $vsPath 'VC\Tools\MSVC\14.44.35207\atlmfc\include'
-          if (!(Test-Path (Join-Path $legacyDir 'atlbase.h')) -or !(Test-Path (Join-Path $toolsetDir 'atlbase.h'))) {
-            $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-            if (!(Test-Path $installer)) { throw "vs_installer not found: $installer" }
-            & $installer modify --installPath "$vsPath" --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart --nocache --includeRecommended
-            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { exit $LASTEXITCODE }
-          } else {
-            Write-Host 'ATL already present for toolset 14.44'
-          }
-          $realDir = @($legacyDir, $toolsetDir) | Where-Object { Test-Path (Join-Path $_ 'atlbase.h') } | Select-Object -First 1
-          if (!$realDir) { throw 'ATL headers still missing after install' }
-          Write-Host "Using ATL include: $realDir"
-          if (!(Test-Path (Join-Path $legacyDir 'atlbase.h'))) {
-            Write-Host "Populating legacy ATL include dir: $legacyDir"
-            New-Item -ItemType Directory -Force $legacyDir | Out-Null
-            Copy-Item -Path (Join-Path $realDir '*') -Destination $legacyDir -Recurse -Force
-          }
-          "INCLUDE=$realDir;$legacyDir;$env:INCLUDE" >> $env:GITHUB_ENV
 
       - name: Restore dependencies
         id: dependencies
