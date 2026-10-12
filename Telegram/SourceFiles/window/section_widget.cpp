@@ -392,6 +392,12 @@ void SectionWidget::PaintBackground(
 		QSize fill,
 		QRect clip,
 		bool paused) {
+#ifdef Q_OS_WIN
+	p.save();
+	const auto restore = gsl::finally([&] { p.restore(); });
+	p.setOpacity(p.opacity() * Platform::WindowsBackdropPaintOpacity());
+#endif
+	const auto opacity = p.opacity();
 	const auto &background = theme->background();
 	if (background.colorForFill) {
 		p.fillRect(clip, *background.colorForFill);
@@ -416,7 +422,7 @@ void SectionWidget::PaintBackground(
 			p.translate(center);
 			p.rotate(cache.giftRotation);
 			p.translate(-center);
-			p.setOpacity(0.5);
+			p.setOpacity(0.5 * opacity);
 			cache.gift->paint(p, {
 				.textColor = st::windowFg->c,
 				.size = QSize(size, size),
@@ -468,11 +474,11 @@ void SectionWidget::PaintBackground(
 		const auto fade = (state.shown < 1. && !gradient.isNull());
 		if (fade) {
 			paintCache(state.was);
-			p.setOpacity(state.shown);
+			p.setOpacity(state.shown * opacity);
 		}
 		paintCache(state.now);
 		if (fade) {
-			p.setOpacity(1.);
+			p.setOpacity(opacity);
 		}
 		return;
 	}

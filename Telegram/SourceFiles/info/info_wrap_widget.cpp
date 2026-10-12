@@ -386,6 +386,9 @@ void WrapWidget::createTopBar() {
 		_controller.get(),
 		TopBarStyle(wrapValue),
 		std::move(selectedItems));
+	_topBar->setBlurBackdrop([=] {
+		return _content ? _content->blurBackdrop(_topBar->geometry(), this) : QImage();
+	});
 	_topBar->selectionActionRequests(
 	) | rpl::on_next([=](SelectionAction action) {
 		_content->selectionAction(action);
@@ -723,6 +726,11 @@ void WrapWidget::showContent(object_ptr<ContentWidget> content) {
 		old.destroy();
 	}
 	_additionalScroll = 0;
+	_content->blurBackdropChanges() | rpl::on_next([=] {
+		if (_topBar) {
+			_topBar->invalidateBlurBackdrop();
+		}
+	}, _content->lifetime());
 	_content->show();
 	finishShowContent();
 }

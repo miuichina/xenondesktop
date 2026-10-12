@@ -116,6 +116,8 @@ public:
 	virtual void enableBackButton() {
 	}
 
+	[[nodiscard]] QImage blurBackdrop(QRect area, not_null<QWidget*> ancestor);
+	[[nodiscard]] rpl::producer<> blurBackdropChanges() const;
 	void applyAdditionalScroll(int additionalScroll);
 	void applyMaxVisibleHeight(int maxVisibleHeight);
 	int scrollTillBottom(int forHeight) const;
@@ -262,6 +264,8 @@ private:
 	std::optional<int> _scrollTopRestore;
 	bool _applyingScrollTopRestore = false;
 	bool _isStackBottom = false;
+	bool _paintingBackdrop = false;
+	rpl::event_stream<> _blurBackdropChanges;
 
 	// To paint round edges from content.
 	style::margins _paintPadding;

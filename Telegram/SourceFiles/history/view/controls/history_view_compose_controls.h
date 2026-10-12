@@ -123,6 +123,7 @@ class StashHintManager;
 namespace HistoryView {
 
 class FieldHeader;
+class BlurBackground;
 
 enum class ComposeControlsMode {
 	Normal,
@@ -187,6 +188,8 @@ public:
 	[[nodiscard]] PeerData *sendAsPeer() const;
 
 	void finishAnimating();
+	void setBlurBackdrop(Fn<QImage(QRect)> backdrop);
+	void invalidateBlurBackdrop();
 
 	void move(int x, int y);
 	void resizeToWidth(int width);
@@ -555,7 +558,9 @@ private:
 	rpl::variable<bool> _hidden;
 	Mode _mode = Mode::Normal;
 
+	std::unique_ptr<style::InputField> _fieldStyle;
 	const std::unique_ptr<Ui::RpWidget> _wrap;
+	std::unique_ptr<BlurBackground> _blur;
 	std::unique_ptr<Ui::RpWidget> _writeRestricted;
 	rpl::event_stream<FullReplyTo> _jumpToItemRequests;
 

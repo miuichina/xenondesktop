@@ -6,6 +6,9 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mainwindow.h"
+#include "history/view/history_view_top_bar_blur.h"
+#include "history/view/history_view_blur_transition.h"
+#include "history/view/history_view_top_bar_widget.h"
 
 #include "data/data_document.h"
 #include "data/data_session.h"
@@ -13,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/ui/dialogs_layout.h"
 #include "history/history.h"
 #include "history/history_drag_area.h"
+#include "ui/effects/animations.h"
+#include "crl/crl_on_main.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
@@ -47,11 +52,102 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "window/window_setup_email.h"
 #include "window/window_media_preview.h"
+#include "styles/style_layers.h"
 #include "styles/style_window.h"
 
 #include <QtGui/QWindow>
 
 namespace {
+
+class LayerBlur final {
+public:
+	LayerBlur(
+		not_null<Ui::LayerStackWidget*> layer,
+		QImage backdrop,
+		Fn<void()> closed);
+
+private:
+	void update();
+	void finish();
+
+	not_null<Ui::LayerStackWidget*> _layer;
+	Ui::RpWidget _widget;
+	HistoryView::BlurTransition _transition;
+	HistoryView::BlurBackground _blur;
+	Fn<void()> _closed;
+	Ui::Animations::Basic _animation;
+	bool _wasAnimating = false;
+	bool _finished = false;
+	rpl::lifetime _lifetime;
+
+};
+
+LayerBlur::LayerBlur(
+		not_null<Ui::LayerStackWidget*> layer,
+		QImage backdrop,
+		Fn<void()> closed)
+: _layer(layer)
+, _widget(layer->parentWidget())
+, _transition(st::boxDuration)
+, _blur(&_widget, [=] {
+	return HistoryView::PrepareBlurImage(backdrop, _widget.size(), true);
+}, [] { return QColor(Qt::transparent); }, 0.f, [=] {
+	return float(_transition.value(crl::now()));
+})
+, _closed(std::move(closed))
+, _animation([=](crl::time now) {
+	update();
+	return _transition.animating(now);
+}) {
+	_widget.setAttribute(Qt::WA_TransparentForMouseEvents);
+	_widget.setFocusPolicy(Qt::NoFocus);
+	_widget.hide();
+	_layer->paintRequest() | rpl::on_next([=] { update(); }, _lifetime);
+	_layer->events() | rpl::on_next([=](not_null<QEvent*> event) {
+		if (event->type() == QEvent::Show) {
+			update();
+		}
+	}, _lifetime);
+	_layer->sizeValue() | rpl::on_next([=] {
+		_widget.setGeometry(_layer->geometry());
+	}, _lifetime);
+	_layer->hideFinishEvents() | rpl::on_next([=] {
+		_finished = true;
+		update();
+	}, _lifetime);
+}
+
+void LayerBlur::update() {
+	const auto now = crl::now();
+	const auto shown = _layer->canSetFocus();
+	const auto enabled = base::options::value<bool>(HistoryView::kOptionBlurEffects);
+	if (enabled || _layer->window()->property("xenonWindowsBackdrop").toBool()) {
+		_layer->removeBodyCache();
+	}
+	const auto changed = (_transition.shown() != shown);
+	_transition.setShown(shown, now);
+	if (changed) {
+		if (shown) {
+			_finished = false;
+		}
+		_widget.stackUnder(_layer);
+		_widget.show();
+		_animation.start();
+	}
+	const auto animating = _transition.animating(now);
+	if (changed || animating || _wasAnimating) {
+		_widget.update();
+	}
+	_wasAnimating = animating;
+	finish();
+}
+
+void LayerBlur::finish() {
+	if (_finished && !_transition.shown() && !_transition.animating(crl::now())) {
+		_finished = false;
+		crl::on_main(_layer, _closed);
+	}
+}
 
 // Code for testing languages is F7-F6-F7-F8
 void FeedLangTestingKey(int key) {
@@ -104,7 +200,7 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 		Ui::ForceFullRepaint(this);
 	}, lifetime());
 
-	setAttribute(Qt::WA_OpaquePaintEvent);
+	setAttribute(Qt::WA_OpaquePaintEvent, !Window::UseWindowsAcrylic());
 }
 
 void MainWindow::initHook() {
@@ -415,16 +511,16 @@ void MainWindow::ensureLayerCreated() {
 	if (_layer) {
 		return;
 	}
+	const auto backdrop = Ui::GrabWidget(bodyWidget()).toImage();
 	_layer = base::make_unique_q<Ui::LayerStackWidget>(
 		bodyWidget(),
 		crl::guard(this, [=] { return controller().uiShow(); }));
-
-	_layer->hideFinishEvents(
-	) | rpl::filter([=] {
-		return _layer != nullptr; // Last hide finish is sent from destructor.
-	}) | rpl::on_next([=] {
-		destroyLayer();
-	}, _layer->lifetime());
+	const auto layer = _layer.get();
+	_layer->lifetime().make_state<LayerBlur>(layer, backdrop, [=] {
+		if (_layer.get() == layer && !layer->canSetFocus()) {
+			destroyLayer();
+		}
+	});
 
 	_layer->boxShownValue(
 	) | rpl::on_next([=](bool shown) {

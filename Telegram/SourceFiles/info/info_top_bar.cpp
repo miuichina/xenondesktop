@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/info_top_bar.h"
+#include "history/view/history_view_top_bar_blur.h"
 
 #include "dialogs/ui/dialogs_stories_list.h"
 #include "lang/lang_keys.h"
@@ -29,6 +30,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_dialogs.h"
 #include "styles/style_info.h"
 
+#include <QtGui/QPainterPath>
+
 namespace Info {
 
 TopBar::TopBar(
@@ -46,6 +49,29 @@ TopBar::TopBar(
 	setAttribute(Qt::WA_OpaquePaintEvent, !_roundRect);
 	setSelectedItems(std::move(selectedItems));
 	updateControlsVisibility(anim::type::instant);
+}
+
+TopBar::~TopBar() = default;
+
+void TopBar::setBlurBackdrop(Fn<QImage()> backdrop) {
+	_blur = std::make_unique<HistoryView::BlurBackground>(
+		this,
+		std::move(backdrop),
+		[=] { return anim::color(_st.bg, _st.highlightBg, _a_highlight.value(0.)); });
+	if (_st.radius) {
+		sizeValue() | rpl::on_next([=] {
+			auto path = QPainterPath();
+			path.addRoundedRect(
+				rect().adjusted(0, 0, 0, 2 * _st.radius), _st.radius, _st.radius);
+			setMask(QRegion(path.toFillPolygon().toPolygon()));
+		}, lifetime());
+	}
+}
+
+void TopBar::invalidateBlurBackdrop() {
+	if (_blur) {
+		_blur->invalidate();
+	}
 }
 
 template <typename Callback>

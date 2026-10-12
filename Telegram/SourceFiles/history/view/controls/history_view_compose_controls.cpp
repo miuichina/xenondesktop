@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/controls/history_view_compose_controls.h"
+#include "history/view/history_view_top_bar_blur.h"
+#include "history/view/history_view_top_bar_widget.h"
 
 #include "history/view/controls/history_view_bot_menu_button.h"
 
@@ -208,6 +210,10 @@ public:
 	void setHistory(const SetHistoryArgs &args);
 	void updateTopicRootId(MsgId topicRootId);
 	void init();
+	void setBlurBackground(bool enabled) {
+		_blurBackground = enabled;
+		update();
+	}
 
 	void editMessage(
 		FullMsgId id,
@@ -294,6 +300,7 @@ private:
 		Ui::Text::String description;
 	};
 
+	bool _blurBackground = false;
 	const std::shared_ptr<ChatHelpers::Show> _show;
 	const Fn<bool()> _hasSendText;
 
@@ -398,7 +405,9 @@ void FieldHeader::init() {
 	) | rpl::on_next([=] {
 		Painter p(this);
 		p.setInactive(_show->paused(Window::GifPauseReason::Any));
-		p.fillRect(rect(), st::historyComposeAreaBg);
+		if (!_blurBackground) {
+			p.fillRect(rect(), st::historyComposeAreaBg);
+		}
 
 		const auto position = st::historyReplyIconPosition;
 		if (_suggestOptions) {
@@ -1223,6 +1232,7 @@ ComposeControls::ComposeControls(
 	? _regularWindow->tabbedSelector()
 	: not_null(_ownedSelector.get()))
 , _mode(descriptor.mode)
+, _fieldStyle(std::make_unique<style::InputField>(_st.field))
 , _wrap(std::make_unique<Ui::RpWidget>(_parent))
 , _send(std::make_shared<Ui::SendButton>(_wrap.get(), _st.send))
 , _aiButton(Ui::CreateChild<Controls::ComposeAiButton>(
@@ -1253,7 +1263,7 @@ ComposeControls::ComposeControls(
 , _field(
 	Ui::CreateChild<Ui::InputField>(
 		_wrap.get(),
-		_st.field,
+		*_fieldStyle,
 		Ui::InputField::Mode::MultiLine,
 		tr::lng_message_ph()))
 , _richDraftPreview(std::make_unique<Controls::RichDraftPreview>(
@@ -1469,6 +1479,31 @@ ComposeControls::~ComposeControls() {
 	unregisterDraftSources();
 	setTabbedPanel(nullptr);
 	session().api().request(_inlineBotResolveRequestId).cancel();
+}
+
+void ComposeControls::setBlurBackdrop(Fn<QImage(QRect)> backdrop) {
+	_blur = std::make_unique<BlurBackground>(
+		_wrap.get(),
+		[=] { return backdrop(_wrap->geometry()); },
+		[=] { return _st.bg->c; });
+	rpl::merge(
+		rpl::single(rpl::empty_value()),
+		base::options::lookup<bool>(kOptionBlurEffects).changes()
+	) | rpl::on_next([=] {
+		const auto enabled = base::options::value<bool>(kOptionBlurEffects);
+		_fieldStyle->textBg = enabled ? st::transparent : _st.field.textBg;
+		_fieldStyle->textBgActive = enabled ? st::transparent : _st.field.textBgActive;
+		_field->setAttribute(Qt::WA_OpaquePaintEvent, !enabled);
+		_field->update();
+		_header->setBlurBackground(enabled);
+		_tabbedSelectorToggle->setBackgroundVisible(!enabled);
+	}, _wrap->lifetime());
+}
+
+void ComposeControls::invalidateBlurBackdrop() {
+	if (_blur) {
+		_blur->invalidate();
+	}
 }
 
 Main::Session &ComposeControls::session() const {

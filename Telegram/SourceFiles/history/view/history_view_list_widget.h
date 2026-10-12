@@ -583,6 +583,8 @@ public:
 
 	~ListWidget();
 
+	void paintBackdrop(Painter &p, QRect clip);
+
 protected:
 	void visibleTopBottomUpdated(
 		int visibleTop,
@@ -889,7 +891,8 @@ private:
 	void paintUserpics(
 		Painter &p,
 		const Ui::ChatPaintContext &context,
-		QRect clip);
+		QRect clip,
+		bool backdrop = false);
 	VideoUserpic *validateVideoUserpic(not_null<PeerData*> peer);
 	void paintDates(
 		Painter &p,
@@ -906,7 +909,7 @@ private:
 	// Method has "bool (*Method)(not_null<Element*> view, int itemtop, int itembottom)" signature
 	// if it returns false the enumeration stops immediately.
 	template <EnumItemsDirection direction, typename Method>
-	void enumerateItems(Method method);
+	void enumerateItems(Method method, std::optional<QRect> area = std::nullopt);
 
 	// This function finds all userpics on the left that are displayed and calls template method
 	// for each found userpic (from the top to the bottom) using enumerateItems() method.
@@ -914,7 +917,7 @@ private:
 	// Method has "bool (*Method)(not_null<Element*> view, int userpicTop)" signature
 	// if it returns false the enumeration stops immediately.
 	template <typename Method>
-	void enumerateUserpics(Method method);
+	void enumerateUserpics(Method method, std::optional<QRect> area = std::nullopt);
 
 	// This function finds all date elements that are displayed and calls template method
 	// for each found date element (from the bottom to the top) using enumerateItems() method.

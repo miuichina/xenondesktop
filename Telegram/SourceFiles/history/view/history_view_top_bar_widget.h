@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "history/view/history_view_top_bar_blur.h"
 #include "ui/rp_widget.h"
 #include "ui/unread_badge.h"
 #include "ui/effects/animations.h"
@@ -49,6 +50,9 @@ namespace HistoryView {
 
 class SendActionPainter;
 
+inline constexpr auto kOptionBlurEffects = "xenon-blur-effects";
+inline constexpr auto kOptionBlurIntensity = "xenon-blur-intensity";
+
 [[nodiscard]] QString SwitchToChooseFromQuery();
 
 class TopBarWidget final : public Ui::RpWidget {
@@ -78,6 +82,7 @@ public:
 		return _membersShowAreaActive.events();
 	}
 	void setAnimatingMode(bool enabled);
+	void setBlurBackdrop(Fn<QImage()> backdrop);
 
 	void setActiveChat(
 		ActiveChat activeChat,
@@ -188,6 +193,9 @@ private:
 	void connectingAnimationCallback();
 
 	void paintTopBar(Painter &p);
+	void paintBarContent(Painter &p);
+	void updateBlurSurface();
+	void createBlurSurface();
 	[[nodiscard]] PeerData *titleNamePeer() const;
 	void paintStatus(
 		Painter &p,
@@ -215,6 +223,12 @@ private:
 	const not_null<Window::SessionController*> _controller;
 	const bool _primaryWindow = false;
 	ActiveChat _activeChat;
+	Fn<QImage()> _blurBackdrop;
+	QImage _blurForeground;
+	TopBarBlurFrame _blurFrame;
+	std::unique_ptr<Ui::RpWidgetWrap> _blurSurface;
+	bool _blurGpuFailed = false;
+	bool _blurCreatePending = false;
 	QString _customTitleText;
 	std::unique_ptr<EmojiInteractionSeenAnimation> _emojiInteractionSeen;
 	rpl::lifetime _activeChatLifetime;

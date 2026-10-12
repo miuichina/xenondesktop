@@ -249,14 +249,16 @@ ListWidget::MouseState::MouseState(
 }
 
 template <ListWidget::EnumItemsDirection direction, typename Method>
-void ListWidget::enumerateItems(Method method) {
+void ListWidget::enumerateItems(Method method, std::optional<QRect> area) {
+	const auto visibleTop = area ? area->y() : _visibleTop;
+	const auto visibleBottom = area ? area->y() + area->height() : _visibleBottom;
 	constexpr auto TopToBottom = (direction == EnumItemsDirection::TopToBottom);
 
 	// No displayed messages in this history.
 	if (_items.empty()) {
 		return;
 	}
-	if (_visibleBottom <= _itemsTop || _itemsTop + _itemsHeight <= _visibleTop) {
+	if (visibleBottom <= _itemsTop || _itemsTop + _itemsHeight <= visibleTop) {
 		return;
 	}
 
@@ -271,14 +273,14 @@ void ListWidget::enumerateItems(Method method) {
 		? std::lower_bound(
 			beginning,
 			ending,
-			_visibleTop - collapseGapTotal,
+			visibleTop - collapseGapTotal,
 			[this](auto &elem, int top) {
 				return this->itemTop(elem) + elem->height() <= top;
 			})
 		: std::upper_bound(
 			beginning,
 			ending,
-			_visibleBottom,
+			visibleBottom,
 			[this](int bottom, auto &elem) {
 				return this->itemTop(elem) + elem->height() >= bottom;
 			});
@@ -325,14 +327,14 @@ void ListWidget::enumerateItems(Method method) {
 		auto itembottom = itemtop + view->height();
 
 		if (TopToBottom) {
-			if (itembottom <= _visibleTop) {
+			if (itembottom <= visibleTop) {
 				if (++from == ending) {
 					break;
 				}
 				continue;
 			}
 		} else {
-			if (itemtop >= _visibleBottom) {
+			if (itemtop >= visibleBottom) {
 				if (from == beginning) {
 					break;
 				}
@@ -347,11 +349,11 @@ void ListWidget::enumerateItems(Method method) {
 
 		// Skip all the items that are below / above the visible area.
 		if (TopToBottom) {
-			if (itembottom >= _visibleBottom) {
+			if (itembottom >= visibleBottom) {
 				return;
 			}
 		} else {
-			if (itemtop <= _visibleTop) {
+			if (itemtop <= visibleTop) {
 				return;
 			}
 		}
@@ -370,7 +372,10 @@ void ListWidget::enumerateItems(Method method) {
 }
 
 template <typename Method>
-void ListWidget::enumerateUserpics(Method method) {
+void ListWidget::enumerateUserpics(Method method, std::optional<QRect> area) {
+	const auto visibleBottom = area
+		? std::max(_visibleBottom, area->y() + area->height())
+		: _visibleBottom;
 	// Find and remember the top of an attached messages pack
 	// -1 means we didn't find an attached to next message yet.
 	int lowestAttachedItemTop = -1;
@@ -390,7 +395,7 @@ void ListWidget::enumerateUserpics(Method method) {
 		if (view->displayFromPhoto()
 			|| (view->hasFromPhoto()
 				&& view->isAttachedToNext()
-				&& itembottom >= _visibleBottom)) {
+				&& itembottom >= visibleBottom)) {
 			if (lowestAttachedItemTop < 0) {
 				lowestAttachedItemTop = itemtop + view->marginTop();
 			}
@@ -398,7 +403,7 @@ void ListWidget::enumerateUserpics(Method method) {
 			auto userpicMinBottomSkip = st::historyPaddingBottom + st::msgMargin.bottom();
 			auto userpicBottom = std::min(
 				itembottom - view->marginBottom(),
-				_visibleBottom - userpicMinBottomSkip);
+				visibleBottom - userpicMinBottomSkip);
 
 			// Do not let the userpic go above the attached messages pack top line.
 			userpicBottom = std::max(
@@ -420,7 +425,7 @@ void ListWidget::enumerateUserpics(Method method) {
 		return true;
 	};
 
-	enumerateItems<EnumItemsDirection::TopToBottom>(userpicCallback);
+	enumerateItems<EnumItemsDirection::TopToBottom>(userpicCallback, area);
 }
 
 template <typename Method>
@@ -3008,6 +3013,36 @@ void ListWidget::checkActivation() {
 	}
 }
 
+void ListWidget::paintBackdrop(Painter &p, QRect clip) {
+	if (_resizePending || clip.isEmpty()) {
+		return;
+	}
+	auto context = preparePaintContext(clip);
+	context.paused = true;
+	context.reactionInfo = nullptr;
+	_pathGradient->startFrame(
+		0,
+		width(),
+		std::min(st::msgMaxWidth / 2, width() / 2));
+	const auto sending = _delegate->listSendingAnimation();
+	enumerateItems<EnumItemsDirection::TopToBottom>([&](
+			not_null<Element*> view,
+			int top,
+			int bottom) {
+		if (sending && sending->hasAnimatedMessage(view->data())) {
+			return true;
+		}
+		p.save();
+		p.translate(0, top);
+		auto local = context.translated(0, -top);
+		local.outbg = view->hasOutLayout();
+		view->draw(p, local);
+		p.restore();
+		return true;
+	}, clip);
+	paintUserpics(p, context, clip, true);
+}
+
 void ListWidget::paintEvent(QPaintEvent *e) {
 	const auto overlapped = _delegate->listIgnorePaintEvent(this, e);
 	if (_readMetricsTracker) {
@@ -3243,7 +3278,8 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 void ListWidget::paintUserpics(
 		Painter &p,
 		const Ui::ChatPaintContext &context,
-		QRect clip) {
+		QRect clip,
+		bool backdrop) {
 	if (_context == Context::ShortcutMessages) {
 		return;
 	}
@@ -3308,7 +3344,7 @@ void ListWidget::paintUserpics(
 			}
 		}
 		return true;
-	});
+	}, backdrop ? std::optional(clip) : std::nullopt);
 }
 
 ListWidget::VideoUserpic *ListWidget::validateVideoUserpic(

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/section_widget.h"
 #include "window/section_memento.h"
 #include "history/view/history_view_corner_buttons.h"
+#include "history/view/history_view_top_bar_blur.h"
 #include "history/view/history_view_list_widget.h"
 #include "history/history_item_helpers.h"
 #include "history/history_view_top_toast.h"
@@ -17,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_report.h"
 #include "ui/controls/swipe_handler_data.h"
 #include "base/timer.h"
+
+#include <array>
 
 class History;
 class BotKeyboard;
@@ -327,6 +330,8 @@ private:
 	void closeCurrent();
 	void unreadCountUpdated();
 	void updateInnerVisibleArea();
+	[[nodiscard]] QImage renderBlurBackdrop(QRect area);
+	void invalidateBlurBackdrop(bool contentChanged = true);
 	void updateControlsGeometry();
 	void updateAdaptiveLayout();
 	void saveHistoryScrollState(const ListMemento &state);
@@ -560,6 +565,8 @@ private:
 	std::shared_ptr<Ui::ChatTheme> _theme;
 	QPointer<ListWidget> _inner;
 	object_ptr<TopBarWidget> _topBar;
+	QImage _blurBackdrop;
+	std::array<HistoryView::BlurBackdropCache, 2> _blurContentCache;
 	object_ptr<Ui::PlainShadow> _topBarShadow;
 	object_ptr<Ui::InnerDropdown> _membersDropdown = { nullptr };
 	base::Timer _membersDropdownShowTimer;

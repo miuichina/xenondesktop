@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "history/view/controls/history_view_compose_media_edit_manager.h"
 #include "history/view/history_view_corner_buttons.h"
+#include "history/view/history_view_top_bar_blur.h"
 #include "history/history_drag_area.h"
 #include "history/history_item_helpers.h"
 #include "history/history_view_highlight_manager.h"
@@ -22,6 +23,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_bot_menu_button.h"
 #include "ui/widgets/fields/input_field.h"
 #include "mtproto/sender.h"
+
+#include <array>
 
 enum class SendMediaType;
 class MessageLinksParser;
@@ -598,6 +601,12 @@ private:
 	[[nodiscard]] bool hasEnoughLinesForExpand() const;
 	[[nodiscard]] bool textExceedsMaxSize() const;
 	void orderWidgets();
+	[[nodiscard]] QImage blurBackdrop();
+	[[nodiscard]] QImage renderBlurBackdrop(QRect area);
+	void invalidateBlurBackdrop(bool contentChanged = true);
+	void updateComposeBlur();
+	void createComposeBlurSurface();
+	[[nodiscard]] QRect fieldBackgroundRect() const;
 
 	[[nodiscard]] InlineBotQuery parseInlineBotQuery() const;
 
@@ -661,7 +670,7 @@ private:
 
 	void sendInlineResult(InlineBots::ResultSelected result);
 
-	void drawField(Painter &p, const QRect &rect);
+	void drawField(Painter &p, const QRect &rect, bool background = true);
 	void paintEditHeader(
 		Painter &p,
 		const QRect &rect,
@@ -882,6 +891,15 @@ private:
 	int _supportPreloadRequest = 0; // Not real mtpRequestId.
 
 	object_ptr<HistoryView::TopBarWidget> _topBar;
+	QImage _blurBackdrop;
+	std::array<HistoryView::BlurBackdropCache, 2> _blurContentCache;
+	QImage _composeBlurBackdrop;
+	QImage _composeBlurForeground;
+	HistoryView::TopBarBlurFrame _composeBlurFrame;
+	std::unique_ptr<Ui::RpWidgetWrap> _composeBlurSurface;
+	QRect _composeBlurRect;
+	bool _composeBlurGpuFailed = false;
+	bool _composeBlurCreatePending = false;
 	object_ptr<Ui::ElasticScroll> _scroll;
 	QPointer<HistoryInner> _list;
 	History *_migrated = nullptr;
@@ -962,6 +980,7 @@ private:
 	std::unique_ptr<HistoryView::Controls::StashHintManager> _stashHintManager;
 	std::shared_ptr<Ui::ChatStyle> _fieldChatStyle;
 	bool _cmdStartShown = false;
+	std::unique_ptr<style::InputField> _fieldStyle;
 	object_ptr<Ui::InputField> _field;
 	std::unique_ptr<HistoryView::Controls::RichDraftPreview> _richDraftPreview;
 	base::unique_qptr<Ui::RpWidget> _fieldDisabled;

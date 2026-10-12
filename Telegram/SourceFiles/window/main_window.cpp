@@ -54,6 +54,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/mac/global_menu_mac.h"
 #endif // Q_OS_MAC
 
+#include <QtCore/QOperatingSystemVersion>
 #include <QtCore/QMimeData>
 #include <QtGui/QWindow>
 #include <QtGui/QScreen>
@@ -87,6 +88,26 @@ using Core::WindowPosition;
 	static auto result = QImage();
 	return result;
 }
+
+base::options::toggle OptionWindowsAcrylic({
+	.id = kOptionWindowsAcrylic,
+	.name = "Windows acrylic blur",
+	.scope = [] {
+#ifdef Q_OS_WIN
+		return QOperatingSystemVersion::current().microVersion() >= 22621;
+#else
+		return false;
+#endif
+	},
+	.restartRequired = true,
+});
+
+base::options::option<int> OptionWindowsBackgroundOpacity({
+	.id = kOptionWindowsBackgroundOpacity,
+	.name = "Interface background opacity",
+	.defaultValue = 60,
+	.scope = [] { return OptionWindowsAcrylic.relevant(); },
+});
 
 base::options::toggle OptionNewWindowsSizeAsFirst({
 	.id = kOptionNewWindowsSizeAsFirst,
@@ -393,8 +414,13 @@ QImage WithSmallCounter(QImage image, CounterLayerArgs &&args) {
 	return image;
 }
 
+bool UseWindowsAcrylic() {
+	return OptionWindowsAcrylic.relevant() && OptionWindowsAcrylic.value();
+}
+
 MainWindow::MainWindow(not_null<Controller*> controller)
-: _controller(controller)
+: Ui::RpWindow(UseWindowsAcrylic())
+, _controller(controller)
 , _positionUpdatedTimer([=] { savePosition(); })
 , _outdated(Ui::CreateOutdatedBar(body(), cWorkingDir()))
 , _screenReaderBar(Ui::CreateScreenReaderBar(body(), [=] {

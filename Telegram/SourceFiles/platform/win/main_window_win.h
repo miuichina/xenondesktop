@@ -75,6 +75,7 @@ private:
 	};
 
 	void setupNativeWindowFrame();
+	void updateWindowsBackdrop();
 	void setupPreviewPasscodeLock();
 	void updateTaskbarAndIconCounters();
 	void validateWindowTheme(bool native, bool night);
@@ -104,6 +105,20 @@ private:
 	bool _hasActiveFrame = false;
 
 };
+
+void EnsureWindowsAcrylic(QWidget *widget);
+
+class WindowsBackdropPaintScope final {
+public:
+	explicit WindowsBackdropPaintScope(QWidget *widget);
+	~WindowsBackdropPaintScope();
+
+private:
+	float64 _previous = 1.;
+
+};
+
+[[nodiscard]] float64 WindowsBackdropPaintOpacity();
 
 [[nodiscard]] int32 ScreenNameChecksum(const QString &name);
 [[nodiscard]] int32 ScreenNameChecksum(const QScreen *screen);

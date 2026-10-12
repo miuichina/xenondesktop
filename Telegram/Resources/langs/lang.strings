@@ -880,6 +880,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_peer_to_peer_about" = "Disabling peer-to-peer will relay all calls through Telegram servers to avoid revealing your IP address, but may decrease audio and video quality.";
 "lng_settings_advanced" = "Advanced";
 "lng_settings_xenon" = "Xenon settings";
+"lng_settings_xenon_blur_effects" = "Blur effects";
+"lng_settings_xenon_blur_intensity" = "Blur intensity";
+"lng_settings_xenon_windows_acrylic" = "Windows acrylic blur (WIP)";
+"lng_settings_xenon_windows_acrylic_about" = "Blur windows behind Telegram using Windows Acrylic. Requires Windows 11 22H2 or newer and an app restart.";
+"lng_settings_xenon_windows_background_opacity" = "Interface background opacity";
 "lng_settings_xenon_empty" = "Nothing here";
 "lng_settings_xenon_unread_on_top" = "Keep unread chats on top";
 "lng_settings_xenon_unread_on_top_about" = "Chats with unmuted unread messages, marks, mentions and reactions stay right below pinned chats until you read them.";

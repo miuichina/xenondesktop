@@ -774,6 +774,20 @@ bool Sandbox::notify(QObject *receiver, QEvent *e) {
 		return QApplication::notify(receiver, e);
 	}
 
+#ifdef Q_OS_WIN
+	if (receiver->isWidgetType()
+		&& (e->type() == QEvent::Polish
+			|| e->type() == QEvent::Show
+			|| e->type() == QEvent::Paint)) {
+		const auto widget = static_cast<QWidget*>(receiver);
+		if (e->type() == QEvent::Show) {
+			Platform::EnsureWindowsAcrylic(widget);
+		}
+		if (widget->window()->property("xenonWindowsBackdrop").toBool()) {
+			widget->setAttribute(Qt::WA_OpaquePaintEvent, false);
+		}
+	}
+#endif
 	const auto wrap = createEventNestingLevel();
 	if (e->type() == QEvent::UpdateRequest) {
 		const auto weak = QPointer<QObject>(receiver);
@@ -788,8 +802,21 @@ bool Sandbox::notify(QObject *receiver, QEvent *e) {
 		// WHY: stock widgets read the one main palette at paint, so a window
 		// with its own palette gets it swapped into the main palette's slots
 		// for exactly the duration of each of its widgets' paint events.
-		const auto scope = style::main_palette::Override(
-			Ui::WindowPaletteFor(static_cast<QWidget*>(receiver)));
+#ifdef Q_OS_WIN
+		const auto backdropScope = Platform::WindowsBackdropPaintScope(
+			static_cast<QWidget*>(receiver));
+#endif
+		const auto widget = static_cast<QWidget*>(receiver);
+		auto palette = Ui::WindowPaletteFor(widget);
+#ifdef Q_OS_WIN
+		const auto window = widget->window();
+		const auto parent = window->parentWidget();
+		if (!window->property("xenonWindowsBackdrop").toBool()
+			&& parent && parent->window()->property("xenonWindowsBackdrop").toBool()) {
+			palette = nullptr;
+		}
+#endif
+		const auto scope = style::main_palette::Override(palette);
 		return QApplication::notify(receiver, e);
 	}
 	return QApplication::notify(receiver, e);

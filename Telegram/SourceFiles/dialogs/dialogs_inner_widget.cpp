@@ -1019,18 +1019,26 @@ void InnerWidget::showSavedSublists() {
 }
 
 void InnerWidget::paintEvent(QPaintEvent *e) {
-	Painter p(this);
-
-	p.setInactive(
-		_controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any));
 	if (!_savedSublists && _controller->contentOverlapped(this, e)) {
 		return;
 	}
+	Painter p(this);
+	paint(p, e->rect(), false);
+}
+
+void InnerWidget::paintBackdrop(Painter &p, QRect clip) {
+	paint(p, clip, true);
+}
+
+void InnerWidget::paint(Painter &p, QRect clip, bool backdrop) {
+
+	p.setInactive(
+		_controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any));
 	const auto activeEntry = _controller->activeChatEntryCurrent();
-	const auto videoPaused = _controller->isGifPausedAtLeastFor(
+	const auto videoPaused = backdrop || _controller->isGifPausedAtLeastFor(
 		Window::GifPauseReason::Any);
 	auto fullWidth = width();
-	const auto r = e->rect();
+	const auto r = clip;
 	auto dialogsClip = r;
 	const auto ms = crl::now();
 	const auto childListShown = _childListShown.current();
@@ -3521,6 +3529,7 @@ void InnerWidget::updateDialogRow(
 		}
 	}
 	const auto updateRow = [&](int rowTop, int rowHeight) {
+		_backdropChanges.fire(QRect(0, rowTop, width(), rowHeight));
 		if (!updateRect.isEmpty()) {
 			rtlupdate(updateRect.translated(0, rowTop));
 		} else {
@@ -4566,6 +4575,10 @@ void InnerWidget::setLoadMoreFilteredCallback(Fn<void()> callback) {
 
 auto InnerWidget::chosenRow() const -> rpl::producer<ChosenRow> {
 	return _chosenRow.events();
+}
+
+rpl::producer<QRect> InnerWidget::backdropChanges() const {
+	return _backdropChanges.events();
 }
 
 rpl::producer<> InnerWidget::updated() const {

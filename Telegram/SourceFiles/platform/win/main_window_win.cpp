@@ -17,6 +17,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "main/main_session.h"
 #include "base/crc32hash.h"
+#include "base/options.h"
+#include "ui/style/style_core_palette.h"
+#include "ui/window_palette.h"
+#include "ui/painter.h"
+#include "styles/style_chat.h"
+#include "styles/style_dialogs.h"
+#include "styles/style_window.h"
 #include "base/platform/win/base_windows_wrl.h"
 #include "base/platform/base_platform_info.h"
 #include "core/application.h"
@@ -61,6 +68,46 @@ namespace {
 // if the application was deactivated less than 0.5s ago, then the tray
 // icon click (both left or right button) was made from the active app.
 constexpr auto kKeepActiveForTrayIcon = crl::time(500);
+
+constexpr auto kSystemBackdropAttribute = DWORD(38);
+constexpr auto kImmersiveDarkModeAttribute = DWORD(20);
+constexpr auto kAcrylicBackdrop = DWORD(3);
+
+thread_local auto BackdropPaintOpacity = 1.;
+
+class AcrylicPalette final {
+public:
+	void rebuild() {
+		const auto reset = style::main_palette::Override(nullptr);
+		auto &palette = _palettes[_index ^= 1];
+		palette = *style::main_palette::get();
+		palette.finalize();
+		const auto opacity = std::clamp(base::options::value<int>(
+			Window::kOptionWindowsBackgroundOpacity), 0, 100) / 100.;
+		for (const auto color : {
+			st::windowBg, st::windowBgOver, st::dialogsBg,
+			st::dialogsBgOver, st::boxBg, st::boxDividerBg,
+			st::historyComposeAreaBg, st::mainMenuBg, st::topBarBg,
+			st::titleBg, st::titleBgActive, st::contactsBg,
+			st::contactsBgOver, st::sideBarBg, st::introBg,
+			st::filterInputInactiveBg, st::filterInputActiveBg,
+		}) {
+			const auto &value = color->c;
+			palette.colorAtIndex(style::main_palette::indexOfColor(color)).set(
+				value.red(), value.green(), value.blue(),
+				uchar(base::SafeRound(value.alpha() * opacity)));
+		}
+	}
+
+	const style::palette *get() const {
+		return &_palettes[_index];
+	}
+
+private:
+	style::palette _palettes[2];
+	int _index = 0;
+
+};
 
 using namespace Microsoft::WRL;
 
@@ -397,6 +444,31 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 	}, lifetime());
 
 	setupPreviewPasscodeLock();
+	if (testAttribute(Qt::WA_TranslucentBackground)) {
+		const auto palette = lifetime().make_state<AcrylicPalette>();
+		palette->rebuild();
+		Ui::SetWindowPalette(this, [=] {
+			return property("xenonWindowsBackdrop").toBool() ? palette->get() : nullptr;
+		});
+		rpl::merge(
+			base::options::lookup<int>(Window::kOptionWindowsBackgroundOpacity).changes(),
+			style::PaletteChanged()
+		) | rpl::on_next([=] {
+			palette->rebuild();
+			Ui::ForceFullRepaint(this);
+		}, lifetime());
+		paintRequest() | rpl::on_next([=] {
+			if (property("xenonWindowsBackdrop").toBool()) {
+				Painter p(this);
+				p.setCompositionMode(QPainter::CompositionMode_Source);
+				p.fillRect(bodyWidget()->geometry(), Qt::transparent);
+				if (const auto title = titleWidget()) {
+					p.fillRect(title->geometry(), Qt::transparent);
+				}
+			}
+		}, lifetime());
+	}
+
 }
 
 void MainWindow::setupPreviewPasscodeLock() {
@@ -689,7 +761,70 @@ void MainWindow::initHook() {
 		Window::Theme::IsNightMode());
 }
 
+void EnsureWindowsAcrylic(QWidget *widget) {
+	if (!widget->isWindow() || widget->property("xenonWindowsBackdrop").toBool()) {
+		return;
+	}
+	const auto parent = widget->parentWidget();
+	if (!parent || !parent->window()->property("xenonWindowsBackdrop").toBool()
+		|| !widget->testAttribute(Qt::WA_TranslucentBackground)) {
+		return;
+	}
+	const auto handle = reinterpret_cast<HWND>(widget->winId());
+	const auto material = kAcrylicBackdrop;
+	if (SUCCEEDED(DwmSetWindowAttribute(
+		handle, kSystemBackdropAttribute, &material, sizeof(material)))) {
+		const auto margins = MARGINS{ -1, -1, -1, -1 };
+		DwmExtendFrameIntoClientArea(handle, &margins);
+		widget->setProperty("xenonWindowsBackdrop", true);
+	}
+}
+
+WindowsBackdropPaintScope::WindowsBackdropPaintScope(QWidget *widget)
+: _previous(BackdropPaintOpacity) {
+	BackdropPaintOpacity = widget->window()->property("xenonWindowsBackdrop").toBool()
+		? std::clamp(base::options::value<int>(
+			Window::kOptionWindowsBackgroundOpacity), 0, 100) / 100.
+		: 1.;
+}
+
+WindowsBackdropPaintScope::~WindowsBackdropPaintScope() {
+	BackdropPaintOpacity = _previous;
+}
+
+float64 WindowsBackdropPaintOpacity() {
+	return BackdropPaintOpacity;
+}
+
+void MainWindow::updateWindowsBackdrop() {
+	if (!_hWnd || !testAttribute(Qt::WA_TranslucentBackground)) {
+		return;
+	}
+	const auto material = kAcrylicBackdrop;
+	const auto result = DwmSetWindowAttribute(
+		_hWnd, kSystemBackdropAttribute, &material, sizeof(material));
+	const auto supported = SUCCEEDED(result);
+	setProperty("xenonWindowsBackdrop", supported);
+	for (const auto widget : findChildren<QWidget*>()) {
+		widget->setAttribute(Qt::WA_OpaquePaintEvent, false);
+	}
+	if (!supported) {
+		LOG(("Windows backdrop failed: %1").arg(qulonglong(result)));
+		Ui::ForceFullRepaint(this);
+		return;
+	}
+	const auto dark = BOOL(Window::Theme::IsNightMode());
+	DwmSetWindowAttribute(
+		_hWnd,
+		kImmersiveDarkModeAttribute,
+		&dark,
+		sizeof(dark));
+	const auto margins = MARGINS{ -1, -1, -1, -1 };
+	DwmExtendFrameIntoClientArea(_hWnd, &margins);
+}
+
 void MainWindow::validateWindowTheme(bool native, bool night) {
+	updateWindowsBackdrop();
 	if (!IsWindows8OrGreater()) {
 		const auto empty = native ? nullptr : L" ";
 		SetWindowTheme(_hWnd, empty, empty);

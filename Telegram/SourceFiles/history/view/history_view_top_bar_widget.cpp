@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_top_bar_widget.h"
+#include "history/view/history_view_top_bar_blur.h"
 
 #include "history/history.h"
 #include "history/view/history_view_send_action.h"
@@ -61,6 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_main_list.h"
 #include "chat_helpers/emoji_interactions.h"
 #include "base/call_delayed.h"
+#include "base/options.h"
 #include "base/unixtime.h"
 #include "support/support_helper.h"
 #include "apiwrap.h"
@@ -76,6 +78,17 @@ namespace HistoryView {
 namespace {
 
 constexpr auto kEmojiInteractionSeenDuration = 3 * crl::time(1000);
+
+base::options::toggle OptionBlurEffects({
+	.id = kOptionBlurEffects,
+	.name = "Blur effects",
+});
+
+base::options::option<int> OptionBlurIntensity({
+	.id = kOptionBlurIntensity,
+	.name = "Blur intensity",
+	.defaultValue = 60,
+});
 
 [[nodiscard]] inline bool HasGroupCallMenu(not_null<PeerData*> peer) {
 	return !peer->isUser()
@@ -525,7 +538,82 @@ void TopBarWidget::paintEvent(QPaintEvent *e) {
 		return;
 	}
 	updateConnectingState();
+	updateBlurSurface();
+	if (_blurSurface && !_blurSurface->rpWidget()->isHidden()) {
+		UpdateBlurForeground(
+			_blurForeground,
+			size(),
+			devicePixelRatioF(),
+			[&](Painter &p) { paintBarContent(p); });
+		auto frame = MakeBlurFrame(
+			_blurBackdrop(),
+			_blurForeground,
+			st::topBarBg->c,
+			height());
+		if (UpdateBlurFrame(_blurFrame, std::move(frame))) {
+			_blurSurface->rpWidget()->update();
+		}
+		return;
+	}
 	Painter p(this);
+	p.fillRect(QRect(0, 0, width(), st::topBarHeight), st::topBarBg);
+	if (OptionBlurEffects.value() && _blurBackdrop) {
+		PaintBlurBackdrop(p, rect(), _blurBackdrop(), st::topBarBg->c);
+	}
+	paintBarContent(p);
+}
+
+void TopBarWidget::setBlurBackdrop(Fn<QImage()> backdrop) {
+	_blurBackdrop = std::move(backdrop);
+	rpl::merge(
+		OptionBlurEffects.changes(),
+		OptionBlurIntensity.changes()
+	) | rpl::on_next([=] { update(); }, lifetime());
+	update();
+}
+
+void TopBarWidget::updateBlurSurface() {
+	const auto enabled = OptionBlurEffects.value()
+		&& _blurBackdrop
+		&& !_animatingMode
+		&& !_blurGpuFailed
+		&& !_blurBackdrop().isNull();
+	if (enabled && !_blurSurface && !_blurCreatePending) {
+		_blurCreatePending = true;
+		crl::on_main(this, [=] {
+			_blurCreatePending = false;
+			if (OptionBlurEffects.value() && !_blurGpuFailed) {
+				createBlurSurface();
+				update();
+			}
+		});
+	}
+	if (_blurSurface) {
+		_blurSurface->rpWidget()->setGeometry(rect());
+		_blurSurface->rpWidget()->setVisible(enabled);
+	}
+}
+
+void TopBarWidget::createBlurSurface() {
+	_blurSurface = CreateTopBarBlur(this, [=] {
+		return _blurFrame;
+	}, [=] {
+		crl::on_main(this, [=] {
+			_blurGpuFailed = true;
+			_blurSurface.reset();
+			update();
+		});
+	});
+	_blurGpuFailed = !_blurSurface;
+	if (_blurSurface) {
+		const auto widget = _blurSurface->rpWidget();
+		widget->setAttribute(Qt::WA_TransparentForMouseEvents);
+		widget->setFocusPolicy(Qt::NoFocus);
+		widget->lower();
+	}
+}
+
+void TopBarWidget::paintBarContent(Painter &p) {
 
 	const auto selectedButtonsTop = countSelectedButtonsTop(
 		_selectedShown.value(showSelectedActions() ? 1. : 0.));
@@ -534,7 +622,6 @@ void TopBarWidget::paintEvent(QPaintEvent *e) {
 		: -st::topBarHeight;
 	const auto slidingTop = std::max(selectedButtonsTop, searchFieldTop);
 
-	p.fillRect(QRect(0, 0, width(), st::topBarHeight), st::topBarBg);
 	if (slidingTop < 0) {
 		p.translate(0, slidingTop + st::topBarHeight);
 		paintTopBar(p);
@@ -1315,6 +1402,9 @@ void TopBarWidget::finishAnimating() {
 void TopBarWidget::setAnimatingMode(bool enabled) {
 	if (_animatingMode != enabled) {
 		_animatingMode = enabled;
+		if (_blurSurface) {
+			_blurSurface->rpWidget()->setVisible(!enabled && OptionBlurEffects.value());
+		}
 		setAttribute(Qt::WA_OpaquePaintEvent, !_animatingMode);
 		finishAnimating();
 	} else if (!enabled) {

@@ -247,6 +247,7 @@ public:
 
 	// updates history->scrollTopItem/scrollTopOffset
 	void visibleAreaUpdated(int top, int bottom);
+	void paintBackdrop(Painter &p, QRect clip);
 
 	int historyHeight() const;
 	int historyScrollTop() const;
@@ -374,17 +375,28 @@ private:
 	// Method has "bool (*Method)(not_null<Element*> view, int itemtop, int itembottom)" signature
 	// if it returns false the enumeration stops immediately.
 	template <bool TopToBottom, typename Method>
-	void enumerateItemsInHistory(History *history, int historytop, Method method);
+	void enumerateItemsInHistory(
+		History *history,
+		int historytop,
+		Method method,
+		std::optional<int> areaTop = std::nullopt,
+		std::optional<int> areaBottom = std::nullopt);
 
 	template <EnumItemsDirection direction, typename Method>
-	void enumerateItems(Method method) {
+	void enumerateItems(
+			Method method,
+			std::optional<int> areaTop = std::nullopt,
+			std::optional<int> areaBottom = std::nullopt) {
 		constexpr auto TopToBottom = (direction == EnumItemsDirection::TopToBottom);
 		if (TopToBottom && _migrated) {
-			enumerateItemsInHistory<TopToBottom>(_migrated, migratedTop(), method);
+			enumerateItemsInHistory<TopToBottom>(
+				_migrated, migratedTop(), method, areaTop, areaBottom);
 		}
-		enumerateItemsInHistory<TopToBottom>(_history, historyTop(), method);
+		enumerateItemsInHistory<TopToBottom>(
+			_history, historyTop(), method, areaTop, areaBottom);
 		if (!TopToBottom && _migrated) {
-			enumerateItemsInHistory<TopToBottom>(_migrated, migratedTop(), method);
+			enumerateItemsInHistory<TopToBottom>(
+				_migrated, migratedTop(), method, areaTop, areaBottom);
 		}
 	}
 
@@ -394,7 +406,12 @@ private:
 	// Method has "bool (*Method)(not_null<Element*> view, int userpicTop)" signature
 	// if it returns false the enumeration stops immediately.
 	template <typename Method>
-	void enumerateUserpics(Method method);
+	void enumerateUserpics(Method method, std::optional<QRect> area = std::nullopt);
+	void paintUserpic(
+		Painter &p,
+		not_null<Element*> view,
+		int top,
+		bool paused);
 
 	// This function finds all date elements that are displayed and calls template method
 	// for each found date element (from the bottom to the top) using enumerateItems() method.

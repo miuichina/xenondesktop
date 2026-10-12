@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_chat_section.h"
+#include "history/view/history_view_top_bar_blur.h"
+#include "base/options.h"
 
 #include "history/admin_log/history_admin_log_section.h"
 #include "history/view/controls/history_view_top_controls.h"
@@ -505,6 +507,9 @@ ChatWidget::ChatWidget(
 	controller->chatStyle()->paletteChanged(
 	) | rpl::on_next([=] {
 		_scroll->updateBars();
+		for (auto &cache : _blurContentCache) {
+			cache.invalidate();
+		}
 	}, _scroll->lifetime());
 
 	Window::ChatThemeValueFromPeer(
@@ -569,6 +574,33 @@ ChatWidget::ChatWidget(
 		&controller->session(),
 		static_cast<ListDelegate*>(this)));
 	_inner->lower();
+	_topBar->setBlurBackdrop([=] {
+		if (_blurBackdrop.isNull()) {
+			_blurBackdrop = renderBlurBackdrop(_topBar->geometry());
+		}
+		return _blurBackdrop;
+	});
+	_composeControls->setBlurBackdrop([=](QRect area) {
+		return renderBlurBackdrop(area);
+	});
+	_inner->heightValue() | rpl::on_next([=] {
+		invalidateBlurBackdrop();
+	}, lifetime());
+	rpl::merge(
+		base::options::lookup<bool>(kOptionBlurEffects).changes(),
+		base::options::lookup<int>(kOptionBlurIntensity).changes()
+	) | rpl::on_next([=] {
+		_blurBackdrop = QImage();
+		invalidateBlurBackdrop();
+	}, lifetime());
+	session().data().viewRepaintRequest(
+	) | rpl::filter([=](Data::RequestViewRepaint request) {
+		return request.view->delegate().get() == _inner.data();
+	}) | rpl::on_next([=] { invalidateBlurBackdrop(); }, lifetime());
+	session().downloaderTaskFinished() | rpl::on_next([=] {
+		invalidateBlurBackdrop();
+	}, lifetime());
+
 	_topControls = std::make_unique<TopControls>(
 		this,
 		TopControlsDescriptor{
@@ -604,6 +636,7 @@ ChatWidget::ChatWidget(
 			.preparePinnedClickContext = [=](FullMsgId itemId) {
 				return _inner->prepareClickHandlerContext(itemId);
 			},
+			.blurBackdrop = [=](QRect area) { return renderBlurBackdrop(area); },
 		});
 	_scroll->move(0, _topBar->height());
 	_scroll->show();
@@ -624,6 +657,7 @@ ChatWidget::ChatWidget(
 	_scroll->scrolls(
 	) | rpl::on_next([=] {
 		onScroll();
+		invalidateBlurBackdrop(false);
 	}, lifetime());
 	if (session().supportMode() && mode() == Mode::History && !_topic) {
 		_supportAutocomplete = std::make_unique<Support::Autocomplete>(
@@ -4361,6 +4395,11 @@ void ChatWidget::recountChatWidth() {
 }
 
 void ChatWidget::updateControlsGeometry() {
+	for (auto &cache : _blurContentCache) {
+		cache.invalidate();
+	}
+	_blurBackdrop = QImage();
+	invalidateBlurBackdrop();
 	const auto contentWidth = width();
 
 	const auto wasAtBottom = !_scroll->isHidden()
@@ -4485,6 +4524,60 @@ void ChatWidget::updateSubsectionTabsGeometry() {
 
 bool ChatWidget::contentOverlapped(const QRect &globalRect) {
 	return _composeControls->overlaps(globalRect);
+}
+
+QImage ChatWidget::renderBlurBackdrop(QRect area) {
+	if (!_inner || _scroll->isHidden() || area.isEmpty()) {
+		return QImage();
+	}
+	const auto padding = st::topBarBlurRadius;
+	const auto bandHeight = area.height() + 2 * padding;
+	const auto scale = devicePixelRatioF() / HistoryView::BlurTextureDownscale();
+	auto image = QImage(
+		QSize(
+			std::max(int(std::ceil(area.width() * scale)), 1),
+			std::max(int(std::ceil(bandHeight * scale)), 1)),
+		QImage::Format_ARGB32_Premultiplied);
+	image.fill(Qt::transparent);
+	{
+		Painter p(&image);
+		p.scale(
+			image.width() / float64(area.width()),
+			image.height() / float64(bandHeight));
+		p.translate(-area.x(), padding - area.y());
+		const auto clip = area.adjusted(0, -padding, 0, padding);
+		Window::SectionWidget::PaintBackground(
+			p,
+			_theme.get(),
+			size(),
+			clip,
+			true);
+		const auto origin = QPoint(_scroll->x(), _scroll->y() - _scroll->scrollTop());
+		p.translate(origin);
+		p.setClipRect(clip.translated(-origin));
+		auto &cache = _blurContentCache[area.center().y() < height() / 2 ? 0 : 1];
+		cache.paint(p, clip.translated(-origin), scale, [&](Painter &p, QRect area) {
+			_inner->paintBackdrop(p, area);
+		});
+	}
+	return image;
+}
+
+void ChatWidget::invalidateBlurBackdrop(bool contentChanged) {
+	if (contentChanged) {
+		for (auto &cache : _blurContentCache) {
+			cache.invalidate();
+		}
+	}
+	if (!base::options::value<bool>(kOptionBlurEffects)) {
+		return;
+	}
+	_blurBackdrop = QImage();
+	_topBar->update();
+	_composeControls->invalidateBlurBackdrop();
+	if (_topControls) {
+		_topControls->invalidateBlurBackdrop();
+	}
 }
 
 void ChatWidget::paintEvent(QPaintEvent *e) {

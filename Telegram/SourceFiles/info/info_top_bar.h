@@ -14,6 +14,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/numbers_animation.h"
 #include "info/info_wrap_widget.h"
 
+namespace HistoryView {
+class BlurBackground;
+} // namespace HistoryView
+
 namespace style {
 struct InfoTopBar;
 } // namespace style
@@ -54,6 +58,9 @@ public:
 		not_null<Window::SessionNavigation*> navigation,
 		const style::InfoTopBar &st,
 		SelectedItems &&items);
+	~TopBar() override;
+	void setBlurBackdrop(Fn<QImage()> backdrop);
+	void invalidateBlurBackdrop();
 
 	[[nodiscard]] auto backRequest() const {
 		return _backClicks.events();
@@ -158,6 +165,7 @@ private:
 	const not_null<Window::SessionNavigation*> _navigation;
 
 	const style::InfoTopBar &_st;
+	std::unique_ptr<HistoryView::BlurBackground> _blur;
 	std::optional<Ui::RoundRect> _roundRect;
 	Ui::Animations::Simple _a_highlight;
 	bool _highlight = false;

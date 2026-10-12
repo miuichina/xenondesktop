@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/info_content_widget.h"
+#include "history/view/history_view_top_bar_blur.h"
+#include "styles/style_chat.h"
 
 #include "api/api_who_reacted.h"
 #include "boxes/peer_list_box.h"
@@ -34,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/padding_wrap.h"
 #include "ui/search_field_controller.h"
 #include "ui/ui_utility.h"
+#include "ui/painter.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 #include "styles/style_info.h"
@@ -113,10 +116,41 @@ ContentWidget::ContentWidget(
 
 	_scroll->scrollTopChanges(
 	) | rpl::on_next([this] {
+		_blurBackdropChanges.fire({});
 		if (!_applyingScrollTopRestore) {
 			_scrollTopRestore = std::nullopt;
 		}
 	}, lifetime());
+}
+
+rpl::producer<> ContentWidget::blurBackdropChanges() const {
+	return _blurBackdropChanges.events();
+}
+
+QImage ContentWidget::blurBackdrop(QRect area, not_null<QWidget*> ancestor) {
+	if (!_innerWrap || area.isEmpty()) {
+		return QImage();
+	}
+	const auto padding = st::topBarBlurRadius;
+	const auto bandHeight = area.height() + 2 * padding;
+	const auto scale = devicePixelRatioF() / HistoryView::BlurTextureDownscale();
+	auto result = QImage(
+		QSize(
+			std::max(int(std::ceil(area.width() * scale)), 1),
+			std::max(int(std::ceil(bandHeight * scale)), 1)),
+		QImage::Format_ARGB32_Premultiplied);
+	result.fill(_bg->c);
+	Painter p(&result);
+	p.scale(result.width() / float64(area.width()), result.height() / float64(bandHeight));
+	p.translate(-area.x(), padding - area.y());
+	const auto origin = _innerWrap->mapTo(ancestor, QPoint());
+	const auto clip = area.adjusted(0, -padding, 0, padding).translated(-origin);
+	p.translate(origin);
+	p.setClipRect(clip);
+	_paintingBackdrop = true;
+	const auto guard = gsl::finally([&] { _paintingBackdrop = false; });
+	_innerWrap->render(&p, clip.topLeft(), QRegion(clip));
+	return result;
 }
 
 void ContentWidget::resizeEvent(QResizeEvent *e) {
@@ -182,6 +216,11 @@ Ui::RpWidget *ContentWidget::doSetInnerWidget(
 			std::move(inner),
 			_innerWrap ? _innerWrap->padding() : style::margins()));
 	_innerWrap->move(0, 0);
+	_innerWrap->entity()->paintRequest() | rpl::on_next([=] {
+		if (!_paintingBackdrop) {
+			_blurBackdropChanges.fire({});
+		}
+	}, _innerWrap->lifetime());
 
 	setupSwipeHandler(_innerWrap);
 

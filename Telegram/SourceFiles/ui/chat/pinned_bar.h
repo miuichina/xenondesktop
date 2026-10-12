@@ -10,6 +10,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "base/object_ptr.h"
 
+namespace HistoryView {
+class BlurBackground;
+} // namespace HistoryView
+
 namespace Ui {
 
 struct MessageBarContent;
@@ -33,6 +37,8 @@ public:
 	void raise();
 	void customEmojiRepaint();
 	void finishAnimating();
+	void setBlurBackdrop(Fn<QImage(QRect)> backdrop);
+	void invalidateBlurBackdrop();
 
 	void setShadowGeometryPostprocess(Fn<QRect(QRect)> postprocess);
 
@@ -59,6 +65,7 @@ private:
 
 	Ui::SlideWrap<> _wrap;
 	std::unique_ptr<Ui::MessageBar> _bar;
+	std::unique_ptr<HistoryView::BlurBackground> _blur;
 
 	struct {
 		RightButton button = { nullptr };

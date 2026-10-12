@@ -64,6 +64,7 @@ struct TopControlsDescriptor {
 	Fn<void()> showAtStart;
 	Fn<void(Data::MessagePosition)> showAtPosition;
 	Fn<ClickHandlerContext(FullMsgId)> preparePinnedClickContext;
+	Fn<QImage(QRect)> blurBackdrop;
 };
 
 class TopControls final {
@@ -81,6 +82,7 @@ public:
 	void subscribeToPinnedMessages();
 	void setAnimatingMode(bool enabled);
 	void finishAnimating();
+	void invalidateBlurBackdrop();
 	void setRepliesRootId(MsgId repliesRootId);
 	void setTopic(Data::ForumTopic *topic);
 	void setRepliesRootVisible(bool shown);
@@ -135,6 +137,7 @@ private:
 	Fn<void()> _showAtStart;
 	Fn<void(Data::MessagePosition)> _showAtPosition;
 	Fn<ClickHandlerContext(FullMsgId)> _preparePinnedClickContext;
+	Fn<QImage(QRect)> _blurBackdrop;
 
 	const std::unique_ptr<Ui::RpWidget> _wrap;
 	const std::unique_ptr<Ui::RpWidget> _topBars;

@@ -12,6 +12,8 @@ using "ui/menu_icons.style";
 using "chat_helpers/chat_helpers.style"; // GroupCallUserpics
 
 msgMaxWidth: 430px;
+topBarBlurRadius: 24px;
+topBarBlurTintOpacity: 0.6;
 msgFont: font(fsize);
 msgNameFont: semiboldFont;
 msgNameStyle: semiboldTextStyle;

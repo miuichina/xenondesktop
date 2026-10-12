@@ -36,6 +36,7 @@ class Session;
 
 namespace HistoryView {
 class TopBarWidget;
+class BlurBackground;
 class ContactStatus;
 } // namespace HistoryView
 
@@ -257,6 +258,8 @@ private:
 	void updateJumpToDateVisibility(bool fast = false);
 	void updateSearchFromVisibility(bool fast = false);
 	void updateControlsGeometry();
+	QImage renderBlurBackdrop(QRect area);
+	void invalidateBlurBackdrop();
 	void refreshTopBars();
 	void showSearchInTopBar(anim::type animated);
 	void checkUpdateStatus();
@@ -333,6 +336,9 @@ private:
 	std::unique_ptr<Ui::AbstractButton> _frozenAccountBar;
 
 	object_ptr<Ui::RpWidget> _searchControls;
+	std::unique_ptr<HistoryView::BlurBackground> _headerBlur;
+	QImage _headerBlurImage;
+	QRect _headerBlurRect;
 	object_ptr<HistoryView::TopBarWidget> _subsectionTopBar = { nullptr };
 	struct {
 		object_ptr<Ui::IconButton> toggle;

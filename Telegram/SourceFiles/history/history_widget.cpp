@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
+#include "history/view/history_view_top_bar_blur.h"
 
 #include "api/api_compose_with_ai.h"
 #include "api/api_editing.h"
@@ -320,9 +321,10 @@ HistoryWidget::HistoryWidget(
 	_send,
 	st::historySendSize.height()))
 , _forwardPanel(std::make_unique<ForwardPanel>([=] { updateField(); }))
+, _fieldStyle(std::make_unique<style::InputField>(st::historyComposeField))
 , _field(
 	this,
-	st::historyComposeField,
+	*_fieldStyle,
 	Ui::InputField::Mode::MultiLine,
 	tr::lng_message_ph())
 , _richDraftPreview(std::make_unique<HistoryView::Controls::RichDraftPreview>(
@@ -379,6 +381,7 @@ HistoryWidget::HistoryWidget(
 	_muteUnmute->setVisualTabOrder(true);
 
 	session().downloaderTaskFinished() | rpl::on_next([=] {
+		invalidateBlurBackdrop();
 		update();
 	}, lifetime());
 
@@ -389,6 +392,16 @@ HistoryWidget::HistoryWidget(
 	});
 	_scroll->scrolls() | rpl::on_next([=] {
 		handleScroll();
+		invalidateBlurBackdrop(false);
+	}, lifetime());
+	_topBar->setBlurBackdrop([=] { return blurBackdrop(); });
+	rpl::merge(
+		base::options::lookup<bool>(HistoryView::kOptionBlurEffects).changes(),
+		base::options::lookup<int>(HistoryView::kOptionBlurIntensity).changes()
+	) | rpl::on_next([=] {
+		_blurBackdrop = QImage();
+		_composeBlurBackdrop = QImage();
+		updateField();
 	}, lifetime());
 	_scroll->setOverscrollTypes(
 		Ui::ElasticScroll::OverscrollType::Real,
@@ -551,6 +564,9 @@ HistoryWidget::HistoryWidget(
 	controller->chatStyle()->paletteChanged(
 	) | rpl::on_next([=] {
 		_scroll->updateBars();
+		for (auto &cache : _blurContentCache) {
+			cache.invalidate();
+		}
 	}, lifetime());
 
 	_forwardPanel->itemsUpdated(
@@ -3511,6 +3527,32 @@ void HistoryWidget::showHistory(
 
 		_list = _scroll->setOwnedWidget(
 			object_ptr<HistoryInner>(this, _scroll, controller(), _history));
+		_list->heightValue() | rpl::on_next([=] {
+			invalidateBlurBackdrop();
+		}, _list->lifetime());
+		session().data().viewRepaintRequest(
+		) | rpl::filter([=](Data::RequestViewRepaint request) {
+			if (_list->viewByItem(request.view->data()) != request.view) {
+				return false;
+			}
+			const auto y = _scroll->y() - _scroll->scrollTop()
+				+ _list->itemTop(request.view);
+			const auto dirty = QRect(0, y, width(), request.view->height());
+			const auto padding = st::topBarBlurRadius;
+			const auto origin = QPoint(_scroll->x(), _scroll->y() - _scroll->scrollTop());
+			const auto cached = std::any_of(
+				_blurContentCache.begin(),
+				_blurContentCache.end(),
+				[&](const auto &cache) {
+					return cache.intersects(dirty.translated(-origin));
+				});
+			return cached || dirty.intersects(QRect(0, 0, width(), _scroll->y())
+				.adjusted(0, -padding, 0, padding))
+				|| dirty.intersects(fieldBackgroundRect()
+					.adjusted(0, -padding, 0, padding));
+		}) | rpl::on_next([=] {
+			invalidateBlurBackdrop();
+		}, _list->lifetime());
 		_pullToNext->reset(anim::type::instant);
 		_list->sendIntroSticker(
 		) | rpl::on_next([=](not_null<DocumentData*> sticker) {
@@ -8249,6 +8291,11 @@ void HistoryWidget::resizeEvent(QResizeEvent *e) {
 }
 
 void HistoryWidget::updateControlsGeometry() {
+	for (auto &cache : _blurContentCache) {
+		cache.invalidate();
+	}
+	_blurBackdrop = QImage();
+	_composeBlurBackdrop = QImage();
 	const auto width = this->width();
 
 	_topBar->resizeToWidth(width);
@@ -9638,6 +9685,9 @@ void HistoryWidget::checkPinnedBarState() {
 		return controller()->isGifPausedAtLeastFor(
 			Window::GifPauseReason::Any);
 	}, controller()->gifPauseLevelChanged());
+	_pinnedBar->setBlurBackdrop([=](QRect area) {
+		return renderBlurBackdrop(area.translated(_topBars->pos()));
+	});
 	auto pinnedRefreshed = Info::Profile::SharedMediaCountValue(
 		_peer,
 		MsgId(0), // topicRootId
@@ -11269,25 +11319,43 @@ void HistoryWidget::updateField() {
 	rtlupdate(0, fieldAreaTop, width(), height() - fieldAreaTop);
 }
 
-void HistoryWidget::drawField(Painter &p, const QRect &rect) {
-	_repaintFieldScheduled = false;
-
+QRect HistoryWidget::fieldBackgroundRect() const {
 	auto backy = _field->y() - st::historySendPadding;
 	auto backh = fieldHeight() + 2 * st::historySendPadding;
-	auto hasForward = readyToForward();
-	auto drawMsgText = (_editMsgId || _replyTo) ? _replyEditMsg : _kbReplyTo;
 	if (_editMsgId
 		|| _replyTo
-		|| hasForward
+		|| readyToForward()
 		|| _kbReplyTo
 		|| _previewDrawPreview
 		|| _suggestOptions) {
 		backy -= st::historyReplyHeight;
 		backh += st::historyReplyHeight;
 	}
+	return QRect(0, backy, width(), backh);
+}
+
+void HistoryWidget::drawField(
+		Painter &p,
+		const QRect &rect,
+		bool background) {
+	_repaintFieldScheduled = false;
+	const auto area = fieldBackgroundRect();
+	const auto backy = area.y();
+	const auto hasForward = readyToForward();
+	const auto drawMsgText = (_editMsgId || _replyTo) ? _replyEditMsg : _kbReplyTo;
 	p.setInactive(
 		controller()->isGifPausedAtLeastFor(Window::GifPauseReason::Any));
-	p.fillRect(myrtlrect(0, backy, width(), backh), st::historyReplyBg);
+	if (background) {
+		p.fillRect(area, st::historyReplyBg);
+		if (base::options::value<bool>(HistoryView::kOptionBlurEffects)
+			&& _field->isVisible() && !isRecording()) {
+			if (_composeBlurBackdrop.isNull()) {
+				_composeBlurBackdrop = renderBlurBackdrop(area);
+			}
+			HistoryView::PaintBlurBackdrop(
+				p, area, _composeBlurBackdrop, st::historyReplyBg->c);
+		}
+	}
 
 	const auto media = (!_previewDrawPreview && drawMsgText)
 		? drawMsgText->media()
@@ -11551,6 +11619,141 @@ bool HistoryWidget::paintShowAnimationFrame() {
 	return false;
 }
 
+void HistoryWidget::invalidateBlurBackdrop(bool contentChanged) {
+	if (contentChanged) {
+		for (auto &cache : _blurContentCache) {
+			cache.invalidate();
+		}
+	}
+	if (!base::options::value<bool>(HistoryView::kOptionBlurEffects)) {
+		return;
+	}
+	_blurBackdrop = QImage();
+	_composeBlurBackdrop = QImage();
+	_topBar->update();
+	updateField();
+	if (_pinnedBar) {
+		_pinnedBar->invalidateBlurBackdrop();
+	}
+}
+
+QImage HistoryWidget::blurBackdrop() {
+	if (_blurBackdrop.isNull()) {
+		_blurBackdrop = renderBlurBackdrop(_topBar->geometry());
+	}
+	return _blurBackdrop;
+}
+
+QImage HistoryWidget::renderBlurBackdrop(QRect area) {
+	if (!_list || _scroll->isHidden() || !_historyInited || area.isEmpty()) {
+		return QImage();
+	}
+	const auto padding = st::topBarBlurRadius;
+	const auto bandHeight = area.height() + 2 * padding;
+	const auto scale = devicePixelRatioF() / HistoryView::BlurTextureDownscale();
+	auto image = QImage(
+		QSize(
+			std::max(int(std::ceil(area.width() * scale)), 1),
+			std::max(int(std::ceil(bandHeight * scale)), 1)),
+		QImage::Format_ARGB32_Premultiplied);
+	image.fill(Qt::transparent);
+	{
+		Painter p(&image);
+		p.scale(
+			image.width() / float64(area.width()),
+			image.height() / float64(bandHeight));
+		p.translate(-area.x(), padding - area.y());
+		const auto clip = area.adjusted(0, -padding, 0, padding);
+		Window::SectionWidget::PaintBackground(
+			p,
+			controller()->currentChatTheme(),
+			size(),
+			clip,
+			true);
+		const auto origin = QPoint(_scroll->x(), _scroll->y() - _scroll->scrollTop());
+		p.translate(origin);
+		p.setClipRect(clip.translated(-origin));
+		auto &cache = _blurContentCache[area.center().y() < height() / 2 ? 0 : 1];
+		cache.paint(p, clip.translated(-origin), scale, [&](Painter &p, QRect area) {
+			_list->paintBackdrop(p, area);
+		});
+	}
+	return image;
+}
+
+void HistoryWidget::updateComposeBlur() {
+	const auto area = fieldBackgroundRect();
+	const auto enabled = base::options::value<bool>(HistoryView::kOptionBlurEffects)
+		&& _list && !_scroll->isHidden() && _historyInited
+		&& _field->isVisible() && !isSearching() && !isRecording()
+		&& !_showAnimation && !area.isEmpty();
+	if (_composeBlurRect != area) {
+		_composeBlurRect = area;
+		_composeBlurBackdrop = QImage();
+	}
+	_tabbedSelectorToggle->setBackgroundVisible(!enabled);
+	const auto transparent = enabled;
+	_fieldStyle->textBg = transparent ? st::transparent : st::historyComposeAreaBg;
+	_fieldStyle->textBgActive = _fieldStyle->textBg;
+	_field->setAttribute(Qt::WA_OpaquePaintEvent, !transparent);
+	if (enabled && !_composeBlurGpuFailed
+		&& !_composeBlurSurface && !_composeBlurCreatePending) {
+		_composeBlurCreatePending = true;
+		crl::on_main(this, [=] {
+			_composeBlurCreatePending = false;
+			if (base::options::value<bool>(HistoryView::kOptionBlurEffects)
+				&& !_composeBlurGpuFailed) {
+				createComposeBlurSurface();
+				updateField();
+			}
+		});
+	}
+	if (_composeBlurSurface) {
+		_composeBlurSurface->rpWidget()->setGeometry(area);
+		_composeBlurSurface->rpWidget()->setVisible(enabled);
+		if (enabled) {
+			HistoryView::UpdateBlurForeground(
+				_composeBlurForeground,
+				area.size(),
+				devicePixelRatioF(),
+				[&](Painter &p) {
+					p.translate(-area.topLeft());
+					drawField(p, area, false);
+				});
+			if (_composeBlurBackdrop.isNull()) {
+				_composeBlurBackdrop = renderBlurBackdrop(area);
+			}
+			auto frame = HistoryView::MakeBlurFrame(
+				_composeBlurBackdrop,
+				_composeBlurForeground,
+				st::historyReplyBg->c,
+				area.height());
+			if (HistoryView::UpdateBlurFrame(_composeBlurFrame, std::move(frame))) {
+				_composeBlurSurface->rpWidget()->update();
+			}
+		}
+	}
+}
+
+void HistoryWidget::createComposeBlurSurface() {
+	_composeBlurSurface = HistoryView::CreateTopBarBlur(this, [=] {
+		return _composeBlurFrame;
+	}, [=] {
+		crl::on_main(this, [=] {
+			_composeBlurGpuFailed = true;
+			_composeBlurSurface.reset();
+			updateField();
+		});
+	});
+	_composeBlurGpuFailed = !_composeBlurSurface;
+	if (_composeBlurSurface) {
+		const auto widget = _composeBlurSurface->rpWidget();
+		widget->setAttribute(Qt::WA_TransparentForMouseEvents);
+		widget->setFocusPolicy(Qt::NoFocus);
+		widget->lower();
+	}
+}
+
 void HistoryWidget::paintEvent(QPaintEvent *e) {
 	if (paintShowAnimationFrame()
 		|| controller()->contentOverlapped(this, e)) {
@@ -11566,6 +11769,7 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 		this,
 		e->rect());
 
+	updateComposeBlur();
 	Painter p(this);
 	const auto clip = e->rect();
 	if (_list) {
@@ -11577,7 +11781,9 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 			|| _kbShown
 			|| _suggestOptions) {
 			if (!isSearching()) {
-				drawField(p, clip);
+				if (!_composeBlurSurface || _composeBlurSurface->rpWidget()->isHidden()) {
+					drawField(p, clip);
+				}
 			}
 		}
 	} else {

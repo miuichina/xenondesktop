@@ -53,3 +53,22 @@ if (APPLE)
             "$<TARGET_FILE_DIR:test_text>/Contents/Resources/"
     )
 endif()
+
+enable_testing()
+add_executable(test_blur_transition ${src_loc}/tests/test_blur_transition.cpp)
+target_include_directories(test_blur_transition PRIVATE ${src_loc})
+target_compile_features(test_blur_transition PRIVATE cxx_std_20)
+add_test(NAME blur_transition COMMAND test_blur_transition)
+
+if (WIN32)
+    add_executable(test_windows_acrylic ${src_loc}/tests/test_windows_acrylic.cpp)
+    target_compile_features(test_windows_acrylic PRIVATE cxx_std_20)
+    target_link_libraries(test_windows_acrylic PRIVATE dwmapi user32)
+    add_test(NAME windows_acrylic COMMAND test_windows_acrylic)
+    set_tests_properties(windows_acrylic PROPERTIES SKIP_RETURN_CODE 77)
+endif()
+
+add_executable(test_blur_kernel ${src_loc}/tests/test_blur_kernel.cpp)
+target_include_directories(test_blur_kernel PRIVATE ${src_loc})
+target_compile_features(test_blur_kernel PRIVATE cxx_std_20)
+add_test(NAME blur_kernel COMMAND test_blur_kernel)

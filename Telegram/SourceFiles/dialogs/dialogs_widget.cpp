@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_widget.h"
+#include "history/view/history_view_top_bar_blur.h"
+#include "history/view/history_view_top_bar_widget.h"
 
 #include "base/call_delayed.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -26,7 +28,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_contact_status.h"
 #include "history/view/history_view_group_call_bar.h"
 #include "history/view/history_view_requests_bar.h"
-#include "history/view/history_view_top_bar_widget.h"
 #include "boxes/peers/community_box.h"
 #include "boxes/peers/community_pending_requests_box.h"
 #include "boxes/peers/edit_peer_requests_box.h"
@@ -464,11 +465,37 @@ Widget::Widget(
 		_innerList->resizeToWidth(width);
 	}, _innerList->lifetime());
 	_scrollToTop->raise();
+	_headerBlur = std::make_unique<HistoryView::BlurBackground>(
+		_searchControls.data(),
+		[=] { return renderBlurBackdrop(_searchControls->geometry()); },
+		[] { return st::dialogsBg->c; });
+	_inner->backdropChanges() | rpl::on_next([=](QRect area) {
+		const auto dirty = area.translated(_inner->mapTo(this, QPoint()));
+		const auto padding = st::topBarBlurRadius;
+		if (dirty.intersects(_searchControls->geometry().adjusted(0, -padding, 0, padding))
+			|| (_subsectionTopBar && dirty.intersects(
+				_subsectionTopBar->geometry().adjusted(0, -padding, 0, padding)))) {
+			invalidateBlurBackdrop();
+		}
+	}, lifetime());
+	session().downloaderTaskFinished() | rpl::on_next([=] {
+		invalidateBlurBackdrop();
+	}, lifetime());
+	_scroll->scrolls() | rpl::on_next([=] { invalidateBlurBackdrop(); }, lifetime());
+	rpl::merge(
+		base::options::lookup<bool>(HistoryView::kOptionBlurEffects).changes(),
+		base::options::lookup<int>(HistoryView::kOptionBlurIntensity).changes()
+	) | rpl::on_next([=] {
+		_headerBlurImage = QImage();
+		invalidateBlurBackdrop();
+	}, lifetime());
+
 	_lockUnlock->toggle(false, anim::type::instant);
 
 	_inner->updated(
 	) | rpl::on_next([=] {
 		listScrollUpdated();
+		invalidateBlurBackdrop();
 	}, lifetime());
 
 	rpl::combine(
@@ -2401,6 +2428,14 @@ void Widget::refreshTopBars() {
 	if (_openedFolder || _openedForum || _openedCommunity) {
 		if (!_subsectionTopBar) {
 			_subsectionTopBar.create(this, controller());
+			_subsectionTopBar->setBlurBackdrop([=] {
+				const auto area = _subsectionTopBar->geometry();
+				if (_headerBlurImage.isNull() || _headerBlurRect != area) {
+					_headerBlurRect = area;
+					_headerBlurImage = renderBlurBackdrop(area);
+				}
+				return _headerBlurImage;
+			});
 			if (_stories) {
 				_stories->raise();
 			}
@@ -4533,6 +4568,8 @@ void Widget::updateSearchFromVisibility(bool fast) {
 }
 
 void Widget::updateControlsGeometry() {
+	_headerBlurImage = QImage();
+	invalidateBlurBackdrop();
 	if (width() < _narrowWidth) {
 		return;
 	}
@@ -4871,6 +4908,41 @@ bool Widget::redirectKeyToSearch(QKeyEvent *e) const {
 
 bool Widget::redirectImeToSearch() const {
 	return redirectToSearchPossible();
+}
+
+QImage Widget::renderBlurBackdrop(QRect area) {
+	if (!_inner || _scroll->isHidden() || area.isEmpty()) {
+		return QImage();
+	}
+	const auto padding = st::topBarBlurRadius;
+	const auto bandHeight = area.height() + 2 * padding;
+	const auto scale = devicePixelRatioF() / HistoryView::BlurTextureDownscale();
+	auto image = QImage(
+		QSize(
+			std::max(int(std::ceil(area.width() * scale)), 1),
+			std::max(int(std::ceil(bandHeight * scale)), 1)),
+		QImage::Format_ARGB32_Premultiplied);
+	image.fill(st::dialogsBg->c);
+	Painter p(&image);
+	p.scale(image.width() / float64(area.width()), image.height() / float64(bandHeight));
+	p.translate(-area.x(), padding - area.y());
+	const auto origin = _inner->mapTo(this, QPoint());
+	const auto clip = area.adjusted(0, -padding, 0, padding).translated(-origin);
+	p.translate(origin);
+	p.setClipRect(clip);
+	_inner->paintBackdrop(p, clip);
+	return image;
+}
+
+void Widget::invalidateBlurBackdrop() {
+	if (!base::options::value<bool>(HistoryView::kOptionBlurEffects)) {
+		return;
+	}
+	_headerBlurImage = QImage();
+	_headerBlur->invalidate();
+	if (_subsectionTopBar) {
+		_subsectionTopBar->update();
+	}
 }
 
 void Widget::paintEvent(QPaintEvent *e) {

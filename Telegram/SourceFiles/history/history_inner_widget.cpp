@@ -910,12 +910,20 @@ void HistoryInner::repaintItem(const Element *view, QRect rect) {
 }
 
 template <bool TopToBottom, typename Method>
-void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Method method) {
+void HistoryInner::enumerateItemsInHistory(
+		History *history,
+		int historytop,
+		Method method,
+		std::optional<int> areaTop,
+		std::optional<int> areaBottom) {
+	const auto visibleTop = areaTop.value_or(_visibleAreaTop);
+	const auto visibleBottom = areaBottom.value_or(_visibleAreaBottom);
+
 	// No displayed messages in this history.
 	if (historytop < 0 || history->isEmpty()) {
 		return;
 	}
-	if (_visibleAreaBottom <= historytop || historytop + history->height() <= _visibleAreaTop) {
+	if (visibleBottom <= historytop || historytop + history->height() <= visibleTop) {
 		return;
 	}
 
@@ -925,8 +933,8 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 	}
 
 	auto searchEdge = TopToBottom
-		? (_visibleAreaTop - collapseGapsTotal)
-		: _visibleAreaBottom;
+		? (visibleTop - collapseGapsTotal)
+		: visibleBottom;
 
 	// Binary search for blockIndex of the first block that is not completely below the visible area.
 	auto blockIndex = BinarySearchBlocksOrItems<TopToBottom>(history->blocks, searchEdge - historytop);
@@ -966,14 +974,14 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 			auto itembottom = itemtop + view->height();
 
 			if (TopToBottom) {
-				if (itembottom <= _visibleAreaTop) {
+				if (itembottom <= visibleTop) {
 					if (++itemIndex >= block->messages.size()) {
 						break;
 					}
 					continue;
 				}
 			} else {
-				if (itemtop >= _visibleAreaBottom) {
+				if (itemtop >= visibleBottom) {
 					if (--itemIndex < 0) {
 						break;
 					}
@@ -987,11 +995,11 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 
 			// Skip all the items that are below / above the visible area.
 			if (TopToBottom) {
-				if (itembottom >= _visibleAreaBottom) {
+				if (itembottom >= visibleBottom) {
 					return;
 				}
 			} else {
-				if (itemtop <= _visibleAreaTop) {
+				if (itemtop <= visibleTop) {
 					return;
 				}
 			}
@@ -1009,11 +1017,11 @@ void HistoryInner::enumerateItemsInHistory(History *history, int historytop, Met
 
 		// Skip all the rest blocks that are below / above the visible area.
 		if (TopToBottom) {
-			if (blockbottom >= _visibleAreaBottom) {
+			if (blockbottom >= visibleBottom) {
 				return;
 			}
 		} else {
-			if (blocktop <= _visibleAreaTop) {
+			if (blocktop <= visibleTop) {
 				return;
 			}
 		}
@@ -1057,7 +1065,10 @@ void HistoryInner::toggleRemoveFromUserpics(bool remove) {
 }
 
 template <typename Method>
-void HistoryInner::enumerateUserpics(Method method) {
+void HistoryInner::enumerateUserpics(Method method, std::optional<QRect> area) {
+	const auto visibleBottom = area
+		? std::max(_visibleAreaBottom, area->y() + area->height())
+		: _visibleAreaBottom;
 	if (!canHaveFromUserpics()) {
 		return;
 	}
@@ -1082,7 +1093,7 @@ void HistoryInner::enumerateUserpics(Method method) {
 		if (view->displayFromPhoto()
 			|| (view->hasFromPhoto()
 				&& view->isAttachedToNext()
-				&& itembottom >= _visibleAreaBottom)) {
+				&& itembottom >= visibleBottom)) {
 			if (lowestAttachedItemTop < 0) {
 				lowestAttachedItemTop = itemtop + view->marginTop();
 			}
@@ -1090,7 +1101,7 @@ void HistoryInner::enumerateUserpics(Method method) {
 			auto userpicMinBottomSkip = _historyMarginBottom + st::msgMargin.bottom();
 			auto userpicBottom = std::min(
 				itembottom - view->marginBottom(),
-				_visibleAreaBottom - userpicMinBottomSkip);
+				visibleBottom - userpicMinBottomSkip);
 
 			// Do not let the userpic go above the attached messages pack top line.
 			userpicBottom = std::max(
@@ -1112,7 +1123,10 @@ void HistoryInner::enumerateUserpics(Method method) {
 		return true;
 	};
 
-	enumerateItems<EnumItemsDirection::TopToBottom>(userpicCallback);
+	enumerateItems<EnumItemsDirection::TopToBottom>(
+		userpicCallback,
+		area ? std::optional(area->y()) : std::nullopt,
+		area ? std::optional(area->y() + area->height()) : std::nullopt);
 }
 
 template <typename Method>
@@ -1410,6 +1424,100 @@ void HistoryInner::startEffectOnRead(not_null<HistoryItem*> item) {
 			_emojiInteractions->playEffectOnRead(view);
 		}
 	}
+}
+
+void HistoryInner::paintUserpic(
+		Painter &p,
+		not_null<Element*> view,
+		int top,
+		bool paused) {
+	const auto item = view->data();
+	if (const auto from = item->displayFrom()) {
+		Dialogs::Ui::PaintUserpic(
+			p,
+			from,
+			validateVideoUserpic(from),
+			_userpics[from],
+			st::historyPhotoLeft,
+			top,
+			width(),
+			st::msgPhotoSize,
+			paused);
+	} else if (const auto info = item->displayHiddenSenderInfo()) {
+		if (info->customUserpic.empty()) {
+			info->emptyUserpic.paintCircle(
+				p,
+				st::historyPhotoLeft,
+				top,
+				width(),
+				st::msgPhotoSize);
+		} else {
+			auto &userpic = _hiddenSenderUserpics[item->id];
+			const auto valid = info->paintCustomUserpic(
+				p,
+				userpic,
+				st::historyPhotoLeft,
+				top,
+				width(),
+				st::msgPhotoSize);
+			if (!valid) {
+				info->customUserpic.load(&session(), item->fullId());
+			}
+		}
+	} else {
+		Unexpected("Corrupt forwarded information in message.");
+	}
+}
+
+void HistoryInner::paintBackdrop(Painter &p, QRect clip) {
+	if (hasPendingResizedItems() || clip.isEmpty()) {
+		return;
+	}
+	auto context = preparePaintContext(clip);
+	context.paused = true;
+	context.reactionInfo = nullptr;
+	_pathGradient->startFrame(
+		0,
+		width(),
+		std::min(st::msgMaxWidth / 2, width() / 2));
+	const auto draw = [&](History *history, int historyTop) {
+		if (!history) {
+			return;
+		}
+		enumerateItemsInHistory<true>(history, historyTop, [&](
+				not_null<Element*> view,
+				int top,
+				int bottom) {
+			if (top >= clip.y() + clip.height()) {
+				return false;
+			}
+			if (history == _history && bottom <= historyDrawTop()) {
+				return true;
+			}
+			if (_controller->sendingAnimation().hasAnimatedMessage(view->data())) {
+				return true;
+			}
+			p.save();
+			p.translate(0, top);
+			context.translate(0, -top);
+			context.outbg = view->hasOutLayout();
+			view->draw(p, context);
+			context.translate(0, top);
+			p.restore();
+			return true;
+		}, clip.y(), clip.y() + clip.height());
+	};
+	draw(_migrated, migratedTop());
+	draw(_history, historyTop());
+	enumerateUserpics([&](not_null<Element*> view, int top) {
+		if (top >= clip.y() + clip.height()) {
+			return false;
+		}
+		if (top + st::msgPhotoSize > clip.y()) {
+			paintUserpic(p, view, top, true);
+		}
+		return true;
+	}, clip);
 }
 
 void HistoryInner::paintEvent(QPaintEvent *e) {
@@ -1731,41 +1839,7 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 						st::msgPhotoSize + std::abs(shift),
 						st::msgPhotoSize));
 			}
-			if (const auto from = item->displayFrom()) {
-				Dialogs::Ui::PaintUserpic(
-					p,
-					from,
-					validateVideoUserpic(from),
-					_userpics[from],
-					st::historyPhotoLeft,
-					userpicTop,
-					width(),
-					st::msgPhotoSize,
-					context.paused);
-			} else if (const auto info = item->displayHiddenSenderInfo()) {
-				if (info->customUserpic.empty()) {
-					info->emptyUserpic.paintCircle(
-						p,
-						st::historyPhotoLeft,
-						userpicTop,
-						width(),
-						st::msgPhotoSize);
-				} else {
-					auto &userpic = _hiddenSenderUserpics[item->id];
-					const auto valid = info->paintCustomUserpic(
-						p,
-						userpic,
-						st::historyPhotoLeft,
-						userpicTop,
-						width(),
-						st::msgPhotoSize);
-					if (!valid) {
-						info->customUserpic.load(&session(), item->fullId());
-					}
-				}
-			} else {
-				Unexpected("Corrupt forwarded information in message.");
-			}
+			paintUserpic(p, view, userpicTop, context.paused);
 			if (shift) {
 				p.translate(-shift, 0);
 			}
@@ -4207,7 +4281,7 @@ void HistoryInner::keyPressEvent(QKeyEvent *e) {
 				// was mutated since the last navigation, possibly by
 				// an unread bar appearing right at the cached index).
 				// Repair the cached index in-place without emitting a
-				// focus change — the framework still thinks the
+				// focus change â€” the framework still thinks the
 				// focused child is _accessibilityFocusedItem and we
 				// are only catching up our bookkeeping. If the item
 				// is not in the loaded slice anymore the index is

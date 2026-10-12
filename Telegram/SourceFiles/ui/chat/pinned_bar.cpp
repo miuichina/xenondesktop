@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/chat/pinned_bar.h"
+#include "history/view/history_view_top_bar_blur.h"
 
 #include "ui/chat/message_bar.h"
 #include "ui/effects/spoiler_mess.h"
@@ -54,6 +55,19 @@ PinnedBar::PinnedBar(
 
 PinnedBar::~PinnedBar() {
 	_right.button.destroy();
+}
+
+void PinnedBar::setBlurBackdrop(Fn<QImage(QRect)> backdrop) {
+	_blur = std::make_unique<HistoryView::BlurBackground>(
+		_wrap.entity(),
+		[=] { return backdrop(_wrap.geometry()); },
+		[] { return st::historyPinnedBg->c; });
+}
+
+void PinnedBar::invalidateBlurBackdrop() {
+	if (_blur) {
+		_blur->invalidate();
+	}
 }
 
 void PinnedBar::setContent(rpl::producer<Ui::MessageBarContent> content) {

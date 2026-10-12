@@ -94,6 +94,7 @@ TopControls::TopControls(
 , _showAtStart(std::move(descriptor.showAtStart))
 , _showAtPosition(std::move(descriptor.showAtPosition))
 , _preparePinnedClickContext(std::move(descriptor.preparePinnedClickContext))
+, _blurBackdrop(std::move(descriptor.blurBackdrop))
 , _wrap(std::make_unique<Ui::RpWidget>(_parent))
 , _topBars(std::make_unique<Ui::RpWidget>(_wrap.get())) {
 	_topBars->show();
@@ -361,10 +362,24 @@ rpl::producer<int> TopControls::heightValue() const {
 	return _height.value();
 }
 
+void TopControls::invalidateBlurBackdrop() {
+	if (_pinnedBar) {
+		_pinnedBar->invalidateBlurBackdrop();
+	}
+	if (_repliesRootView) {
+		_repliesRootView->invalidateBlurBackdrop();
+	}
+}
+
 void TopControls::setupRootView() {
 	_repliesRootView = std::make_unique<Ui::PinnedBar>(_topBars.get(), [=] {
 		return _controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
 	}, _controller->gifPauseLevelChanged());
+	if (_blurBackdrop) {
+		_repliesRootView->setBlurBackdrop([=](QRect area) {
+			return _blurBackdrop(area.translated(_topBars->mapTo(_parent, QPoint())));
+		});
+	}
 	_repliesRootView->setContent(rpl::combine(
 		RootViewContent(
 			_history,
@@ -823,6 +838,11 @@ void TopControls::checkPinnedBarState() {
 		return _controller->isGifPausedAtLeastFor(
 			Window::GifPauseReason::Any);
 	}, _controller->gifPauseLevelChanged());
+	if (_blurBackdrop) {
+		_pinnedBar->setBlurBackdrop([=](QRect area) {
+			return _blurBackdrop(area.translated(_topBars->mapTo(_parent, QPoint())));
+		});
+	}
 	auto pinnedRefreshed = Info::Profile::SharedMediaCountValue(
 		_history->peer,
 		topicRootId,

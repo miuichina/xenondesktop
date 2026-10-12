@@ -218,6 +218,7 @@ public:
 	[[nodiscard]] rpl::producer<> changeSearchFromRequests() const;
 	[[nodiscard]] rpl::producer<ChosenRow> chosenRow() const;
 	[[nodiscard]] rpl::producer<> updated() const;
+	[[nodiscard]] rpl::producer<QRect> backdropChanges() const;
 
 	[[nodiscard]] rpl::producer<int> scrollByDeltaRequests() const;
 	[[nodiscard]] rpl::producer<Ui::ScrollToRequest> mustScrollTo() const;
@@ -269,6 +270,8 @@ public:
 	void accessibilityChildSetFocus(quintptr identity) override;
 	void accessibilityChildActivate(quintptr identity) override;
 
+	void paintBackdrop(Painter &p, QRect clip);
+
 protected:
 	void visibleTopBottomUpdated(
 		int visibleTop,
@@ -286,6 +289,7 @@ protected:
 	void keyPressEvent(QKeyEvent *e) override;
 
 private:
+	void paint(Painter &p, QRect clip, bool backdrop);
 	struct CollapsedRow;
 	struct HashtagResult;
 	struct SponsoredSearchResult;
@@ -792,6 +796,7 @@ private:
 	rpl::event_stream<> _listBottomReached;
 	rpl::event_stream<ChosenRow> _chosenRow;
 	rpl::event_stream<> _updated;
+	rpl::event_stream<QRect> _backdropChanges;
 
 	rpl::event_stream<Ui::ScrollToRequest> _mustScrollTo;
 	rpl::event_stream<Ui::ScrollToRequest> _dialogMoved;

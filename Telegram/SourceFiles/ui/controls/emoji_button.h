@@ -22,6 +22,7 @@ public:
 	EmojiButton(QWidget *parent, const style::EmojiButton &st);
 
 	void setLoading(bool loading);
+	void setBackgroundVisible(bool visible);
 	void setColorOverrides(
 		const style::icon *iconOverride,
 		const style::color *colorOverride,
@@ -38,6 +39,7 @@ private:
 	void loadingAnimationCallback();
 
 	const style::EmojiButton &_st;
+	bool _backgroundVisible = true;
 
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _loading;
 
