@@ -1,6 +1,6 @@
 name: Windows x64
 
-on:
+"on":
   workflow_dispatch:
   push:
     branches: [dev]
