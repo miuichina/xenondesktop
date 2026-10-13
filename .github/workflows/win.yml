@@ -120,12 +120,14 @@ jobs:
         run: |
           if (!$env:TDESKTOP_API_ID -or !$env:TDESKTOP_API_HASH) { throw 'Missing TDESKTOP_API_ID or TDESKTOP_API_HASH repository secrets' }
           Set-Location "$env:SOURCE_ROOT\Telegram"
-          & .\configure.bat qt6 -G 'Ninja Multi-Config' -D CMAKE_CONFIGURATION_TYPES=Release -D CMAKE_BUILD_TYPE=Release -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF -D "TDESKTOP_API_ID=$env:TDESKTOP_API_ID" -D "TDESKTOP_API_HASH=$env:TDESKTOP_API_HASH" 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\configure.log"
+          & .\configure.bat qt6 -G 'Ninja Multi-Config' -D CMAKE_CONFIGURATION_TYPES=Release -D CMAKE_BUILD_TYPE=Release -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT:STRING= -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF -D "TDESKTOP_API_ID=$env:TDESKTOP_API_ID" -D "TDESKTOP_API_HASH=$env:TDESKTOP_API_HASH" 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\configure.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Release
         shell: pwsh
         run: |
+          Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory, TotalVirtualMemorySize, FreeVirtualMemory | Format-List
+          Get-PSDrive -PSProvider FileSystem | Select-Object Name, Used, Free | Format-Table -AutoSize
           cmake --build "$env:SOURCE_ROOT\out" --config Release --target Telegram Updater --parallel 4 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\build.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
