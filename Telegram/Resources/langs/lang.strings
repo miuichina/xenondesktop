@@ -883,6 +883,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_xenon_show_fps" = "Show FPS";
 "lng_settings_xenon_show_fps_about" = "Show UI repaint FPS, the average since enabling, and minimum and maximum over the last second. Idle windows may show zero FPS.";
 "lng_settings_xenon_blur_effects" = "Blur effects";
+"lng_settings_xenon_realtime_blur" = "Real-time blur";
 "lng_settings_xenon_blur_intensity" = "Blur intensity";
 "lng_settings_xenon_windows_acrylic" = "Windows acrylic blur (WIP)";
 "lng_settings_xenon_windows_acrylic_about" = "Blur windows behind Telegram using Windows Acrylic. Requires Windows 11 22H2 or newer and an app restart.";

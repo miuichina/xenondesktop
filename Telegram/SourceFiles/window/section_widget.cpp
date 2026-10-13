@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/section_widget.h"
+#include "history/view/history_view_top_bar_blur.h"
 
 #include "mainwidget.h"
 #include "mainwindow.h"
@@ -333,7 +334,7 @@ void SectionWidget::showFast() {
 
 QPixmap SectionWidget::grabForShowAnimation(
 		const SectionSlideParams &params) {
-	return Ui::GrabWidget(this);
+	return HistoryView::GrabBlurSnapshot(this);
 }
 
 void SectionWidget::PaintBackground(

@@ -5,9 +5,29 @@
 
 #include <QtGui/QImage>
 
+#include <vector>
+
 class Painter;
 
 namespace HistoryView {
+
+inline constexpr auto kOptionRealtimeBlur = "xenon-realtime-blur";
+
+class BlurSnapshot final {
+public:
+	explicit BlurSnapshot(not_null<QWidget*> source);
+	~BlurSnapshot();
+	BlurSnapshot(const BlurSnapshot&) = delete;
+	BlurSnapshot &operator=(const BlurSnapshot&) = delete;
+
+private:
+	std::vector<QPointer<Ui::RpWidget>> _covers;
+
+};
+
+[[nodiscard]] QPixmap GrabBlurSnapshot(
+	not_null<QWidget*> source,
+	QRect rect = {});
 
 struct TopBarBlurFrame {
 	QImage backdrop;
@@ -100,6 +120,7 @@ private:
 	QColor _surfaceTint;
 	float64 _surfaceOpacity = -1.;
 	float _surfaceFade = -1.f;
+	float _rasterStrength = -1.f;
 	QColor _rasterTint;
 	float64 _rasterOpacity = -1.;
 	std::unique_ptr<Ui::RpWidgetWrap> _surface;

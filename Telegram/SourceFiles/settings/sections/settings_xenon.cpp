@@ -3,6 +3,7 @@
 #include "base/options.h"
 #include "dialogs/dialogs_entry.h"
 #include "history/view/history_view_top_bar_widget.h"
+#include "history/view/history_view_top_bar_blur.h"
 #include "lang/lang_keys.h"
 #include "settings/sections/settings_main.h"
 #include "settings/settings_builder.h"
@@ -58,6 +59,7 @@ const auto kMeta = BuildHelper({
 
 	auto &blurEffects = base::options::lookup<bool>(
 		HistoryView::kOptionBlurEffects);
+	auto &realtimeBlur = base::options::lookup<bool>(HistoryView::kOptionRealtimeBlur);
 	const auto blur = builder.addCheckbox({
 		.id = u"xenon/blur_effects"_q,
 		.title = tr::lng_settings_xenon_blur_effects(),
@@ -69,6 +71,18 @@ const auto kMeta = BuildHelper({
 		) | rpl::on_next([option = &blurEffects](bool checked) {
 			option->set(checked);
 		}, blur->lifetime());
+	}
+	const auto realtime = builder.addCheckbox({
+		.id = u"xenon/realtime_blur"_q,
+		.title = tr::lng_settings_xenon_realtime_blur(),
+		.checked = realtimeBlur.value(),
+		.keywords = { u"blur"_q, u"live"_q, u"realtime"_q },
+		.shown = blur ? blur->checkedValue() : rpl::producer<bool>(nullptr),
+	});
+	if (realtime) {
+		realtime->checkedChanges() | rpl::on_next([option = &realtimeBlur](bool checked) {
+			option->set(checked);
+		}, realtime->lifetime());
 	}
 	builder.scope([&] {
 		builder.addSubsectionTitle({
@@ -84,23 +98,23 @@ const auto kMeta = BuildHelper({
 				st::settingsScale,
 				st::settingsScaleLabel,
 				st::normalFont->spacew * 2,
-				st::settingsScaleLabel.style.font->width(u"100%"_q),
+				st::settingsScaleLabel.style.font->width(u"200%"_q),
 				true);
 			const auto slider = control.slider;
 			const auto label = control.label;
 			slider->setAccessibleName(
 				tr::lng_settings_xenon_blur_intensity(tr::now));
 			slider->setPseudoDiscrete(
-				100,
+				200,
 				[](int index) { return index + 1; },
-				std::clamp(option.value(), 1, 100),
+				std::clamp(option.value(), 1, 200),
 				[option = &option](int value) { option->set(value); });
 			rpl::merge(
 				rpl::single(rpl::empty_value()),
 				option.changes()
 			) | rpl::on_next([label, option = &option] {
 				label->setText(QString::number(
-					std::clamp(option->value(), 1, 100)) + '%');
+					std::clamp(option->value(), 1, 200)) + '%');
 			}, slider->lifetime());
 			return {
 				.widget = std::move(control.widget),

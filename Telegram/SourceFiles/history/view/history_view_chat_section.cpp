@@ -3896,7 +3896,7 @@ QPixmap ChatWidget::grabForShowAnimation(const Window::SectionSlideParams &param
 	if (params.fromBottom && _subsectionTabs) {
 		_subsectionTabs->hide();
 	}
-	auto result = Ui::GrabWidget(this);
+	auto result = HistoryView::GrabBlurSnapshot(this);
 	if (hideTopBarShadow) {
 		_topBarShadow->show();
 	}

@@ -26,9 +26,7 @@ public:
 
 	[[nodiscard]] double value(std::int64_t now) const {
 		const auto t = std::clamp((now - _started) / double(_duration), 0., 1.);
-		const auto remaining = 1. - t;
-		return _from + (_to - _from)
-			* std::sqrt(1. - remaining * remaining);
+		return _from + (_to - _from) * t * t * (3. - 2. * t);
 	}
 
 	[[nodiscard]] bool animating(std::int64_t now) const {

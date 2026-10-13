@@ -2649,7 +2649,7 @@ QPixmap Widget::grabForFolderSlideAnimation() {
 	}
 
 	const auto rect = QRect(0, 0, width(), rect::bottom(_scroll));
-	auto result = Ui::GrabWidget(this, rect);
+	auto result = HistoryView::GrabBlurSnapshot(this, rect);
 
 	if (!hidden) {
 		_scrollToTop->show();
@@ -2961,7 +2961,7 @@ void Widget::showAnimated(
 
 	auto oldContentCache = params.oldContentCache;
 	showFast();
-	auto newContentCache = Ui::GrabWidget(this);
+	auto newContentCache = HistoryView::GrabBlurSnapshot(this);
 
 	if (_updateTelegram) {
 		_updateTelegram->hide();
@@ -4014,7 +4014,7 @@ void Widget::openChildList(
 		&& (params.animated == anim::type::normal);
 	if (animated) {
 		destroyChildListCanvas();
-		slide.oldContentCache = Ui::GrabWidget(
+		slide.oldContentCache = HistoryView::GrabBlurSnapshot(
 			this,
 			QRect(_narrowWidth, 0, width() - _narrowWidth, height()));
 	}
@@ -4078,7 +4078,7 @@ void Widget::closeChildList(anim::type animated) {
 	auto oldContentCache = QPixmap();
 	auto animation = (Window::SlideAnimation*)nullptr;
 	if (animated == anim::type::normal) {
-		oldContentCache = Ui::GrabWidget(_childList.get());
+		oldContentCache = HistoryView::GrabBlurSnapshot(_childList.get());
 		_hideChildListCanvas = std::make_unique<Ui::RpWidget>(this);
 		_hideChildListCanvas->setAttribute(Qt::WA_TransparentForMouseEvents);
 		_hideChildListCanvas->setGeometry(geometry);
@@ -4102,7 +4102,7 @@ void Widget::closeChildList(anim::type animated) {
 	}
 	if (animated == anim::type::normal) {
 		_hideChildListCanvas->hide();
-		auto newContentCache = Ui::GrabWidget(this, geometry);
+		auto newContentCache = HistoryView::GrabBlurSnapshot(this, geometry);
 		_hideChildListCanvas->show();
 
 		_childListShown = shown;

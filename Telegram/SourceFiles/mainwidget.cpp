@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mainwidget.h"
+#include "history/view/history_view_top_bar_blur.h"
 
 #include "api/api_updates.h"
 #include "api/api_views.h"
@@ -1958,7 +1959,7 @@ Window::SectionSlideParams MainWidget::prepareShowAnimation(
 	} else if (!isOneColumn() || !_history->isHidden()) {
 		result.oldContentCache = _history->grabForShowAnimation(result);
 	} else {
-		result.oldContentCache = Ui::GrabWidget(this, QRect(
+		result.oldContentCache = HistoryView::GrabBlurSnapshot(this, QRect(
 			0,
 			sectionTop,
 			_dialogsWidth,
@@ -2465,7 +2466,7 @@ QPixmap MainWidget::grabForShowAnimation(const Window::SectionSlideParams &param
 
 	auto sectionTop = getMainSectionTop();
 	if (isOneColumn()) {
-		result = Ui::GrabWidget(this, QRect(
+		result = HistoryView::GrabBlurSnapshot(this, QRect(
 			0,
 			sectionTop,
 			width(),
@@ -2477,7 +2478,7 @@ QPixmap MainWidget::grabForShowAnimation(const Window::SectionSlideParams &param
 		if (_thirdShadow) {
 			_thirdShadow->hide();
 		}
-		result = Ui::GrabWidget(this, QRect(
+		result = HistoryView::GrabBlurSnapshot(this, QRect(
 			_dialogsWidth,
 			sectionTop,
 			width() - _dialogsWidth,
@@ -2524,7 +2525,7 @@ void MainWidget::showAnimated(QPixmap oldContentCache, bool back) {
 
 	showAll();
 	floatPlayerHideAll();
-	auto newContentCache = Ui::GrabWidget(this);
+	auto newContentCache = HistoryView::GrabBlurSnapshot(this);
 	hideAll();
 	floatPlayerShowVisible();
 

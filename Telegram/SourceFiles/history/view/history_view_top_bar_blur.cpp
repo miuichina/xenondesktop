@@ -7,6 +7,8 @@
 #include "crl/crl_on_main.h"
 #include "ui/image/image_prepare.h"
 #include "ui/painter.h"
+#include "ui/qt_object_factory.h"
+#include "ui/ui_utility.h"
 
 #include "ui/gl/gl_surface.h"
 #include "ui/rhi/rhi_image.h"
@@ -22,10 +24,22 @@
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 #include <rhi/qrhi.h>
+#include <QRhiWidget>
 #endif
 
 namespace HistoryView {
 namespace {
+
+base::options::toggle OptionRealtimeBlur({
+	.id = kOptionRealtimeBlur,
+	.name = "Real-time blur",
+});
+
+class BlurCover final : public Ui::RpWidget {
+public:
+	using Ui::RpWidget::RpWidget;
+
+};
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 
@@ -52,8 +66,13 @@ class BlurRenderer final : public Ui::GL::Renderer, public Ui::Rhi::Renderer {
 public:
 	BlurRenderer(
 		Fn<TopBarBlurFrame()> frame,
-		Fn<void()> failed)
-	: _frame(std::move(frame)), _failed(std::move(failed)) {
+		Fn<void()> failed,
+		Fn<void()> ready,
+		Fn<void()> reset)
+	: _frame(std::move(frame))
+	, _failed(std::move(failed))
+	, _rendered(std::move(ready))
+	, _reset(std::move(reset)) {
 	}
 
 	void render(QRhi *rhi, QRhiRenderTarget *rt, QRhiCommandBuffer *cb) override;
@@ -84,6 +103,8 @@ private:
 
 	Fn<TopBarBlurFrame()> _frame;
 	Fn<void()> _failed;
+	Fn<void()> _rendered;
+	Fn<void()> _reset;
 	QRhi *_rhi = nullptr;
 	QRhiRenderPassDescriptor *_screenDescriptor = nullptr;
 	int _sampleCount = 0;
@@ -234,6 +255,7 @@ void BlurRenderer::render(
 		QRhiCommandBuffer *cb) {
 	const auto frame = _frame();
 	if (frame.backdrop.isNull() || frame.foreground.isNull()) {
+		_reset();
 		cb->beginPass(rt, Qt::transparent, { 1.f, 0 });
 		cb->endPass();
 		return;
@@ -309,6 +331,9 @@ void BlurRenderer::render(
 	cb->beginPass(rt, Qt::transparent, { 1.f, 0 });
 	draw(cb, _glass, rt);
 	cb->endPass();
+	if (_rendered) {
+		_rendered();
+	}
 }
 
 void BlurRenderer::releaseResources() {
@@ -322,12 +347,41 @@ void BlurRenderer::releaseResources() {
 	_original.destroy();
 	_rhi = nullptr;
 	_screenDescriptor = nullptr;
+	_backdropKey = 0;
+	_radius = -1.f;
 	_ready = false;
+	if (_reset) {
+		_reset();
+	}
 }
 
 #endif
 
 } // namespace
+
+BlurSnapshot::BlurSnapshot(not_null<QWidget*> source) {
+	for (const auto child : source->findChildren<QWidget*>()) {
+		const auto cover = dynamic_cast<BlurCover*>(child);
+		if (cover && cover->isHidden()
+			&& cover->parentWidget()->isVisibleTo(source)) {
+			_covers.push_back(cover);
+			cover->show();
+		}
+	}
+}
+
+BlurSnapshot::~BlurSnapshot() {
+	for (const auto &cover : _covers) {
+		if (cover) {
+			cover->hide();
+		}
+	}
+}
+
+QPixmap GrabBlurSnapshot(not_null<QWidget*> source, QRect rect) {
+	const auto snapshot = BlurSnapshot(source);
+	return Ui::GrabWidget(source, rect);
+}
 
 bool UpdateBlurFrame(TopBarBlurFrame &cached, TopBarBlurFrame frame) {
 	const auto changed = cached.backdrop.cacheKey() != frame.backdrop.cacheKey()
@@ -450,7 +504,7 @@ TopBarBlurFrame MakeBlurFrame(
 	const auto bandHeight = height + 2 * padding;
 	const auto radius = float(padding * backdrop.height()
 		/ float64(bandHeight)
-		* std::clamp(base::options::value<int>(kOptionBlurIntensity), 1, 100)
+		* std::clamp(base::options::value<int>(kOptionBlurIntensity), 1, 200)
 		/ 100. * strength);
 	tint.setAlphaF(tintOpacity >= 0.f ? tintOpacity : st::topBarBlurTintOpacity);
 	auto opacity = 1.f;
@@ -481,7 +535,7 @@ void PaintBlurBackdrop(
 	const auto padding = st::topBarBlurRadius;
 	const auto factor = backdrop.height() / float64(area.height() + 2 * padding);
 	const auto radius = std::max(1, int(base::SafeRound(padding * factor
-		* std::clamp(base::options::value<int>(kOptionBlurIntensity), 1, 100)
+		* std::clamp(base::options::value<int>(kOptionBlurIntensity), 1, 200)
 		/ 100. * strength)));
 	if (strength > 0.f) {
 		backdrop = Images::BlurLargeImage(std::move(backdrop), radius);
@@ -504,8 +558,107 @@ std::unique_ptr<Ui::RpWidgetWrap> CreateTopBarBlur(
 		Fn<void()> failed) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 	if (Ui::GL::WidgetsRhiSupported()) {
-		return Ui::GL::CreateSurfaceRhi(parent, std::make_unique<BlurRenderer>(
-			std::move(frame), std::move(failed)));
+		struct StartupState {
+			QPointer<Ui::RpWidget> cover;
+			TopBarBlurFrame frame;
+			QImage raster;
+			bool rendered = false;
+		};
+		const auto state = std::make_shared<StartupState>();
+		auto surface = Ui::GL::CreateSurfaceRhi(
+			parent,
+			std::make_unique<BlurRenderer>(frame, failed, [=] {
+				state->rendered = true;
+			}, [=] {
+				state->rendered = false;
+				if (const auto cover = state->cover.data()) {
+					crl::on_main(cover, [=] {
+						if (!state->rendered) {
+							cover->show();
+							cover->update();
+						}
+					});
+				}
+			}));
+		const auto widget = surface->rpWidget();
+		widget->setAttribute(Qt::WA_OpaquePaintEvent, false);
+		const auto cover = Ui::CreateChild<BlurCover>(widget);
+		state->cover = cover;
+		cover->setAttribute(Qt::WA_TransparentForMouseEvents);
+		cover->setFocusPolicy(Qt::NoFocus);
+		surface->sizeValue() | rpl::on_next([=] {
+			state->rendered = false;
+			cover->setGeometry(widget->rect());
+			cover->show();
+		}, cover->lifetime());
+		surface->events() | rpl::on_next([=](not_null<QEvent*> event) {
+			if (event->type() == QEvent::Show
+				|| event->type() == QEvent::ScreenChangeInternal) {
+				state->rendered = false;
+				cover->show();
+				cover->update();
+			}
+		}, cover->lifetime());
+		cover->paintRequest() | rpl::on_next([=] {
+			const auto changed = UpdateBlurFrame(state->frame, frame());
+			const auto &current = state->frame;
+			const auto ratio = cover->devicePixelRatioF();
+			const auto size = cover->size() * ratio;
+			if (changed || state->raster.size() != size
+				|| state->raster.devicePixelRatioF() != ratio) {
+				state->raster = QImage(size, QImage::Format_ARGB32_Premultiplied);
+				state->raster.setDevicePixelRatio(ratio);
+				state->raster.fill(Qt::transparent);
+				Painter p(&state->raster);
+				p.setRenderHint(QPainter::SmoothPixmapTransform);
+				const auto draw = [&](const QImage &image) {
+					p.drawImage(cover->rect(), image, QRectF(
+						0.,
+						current.cropTop * image.height(),
+						image.width(),
+						current.cropHeight * image.height()));
+				};
+				p.setOpacity(current.backdropOpacity);
+				if (!current.original.isNull()) {
+					draw(current.original);
+				}
+				auto blurred = current.backdrop;
+				if (current.radius > 0.f && !blurred.isNull()) {
+					blurred = Images::BlurLargeImage(
+						std::move(blurred),
+						std::max(1, int(base::SafeRound(current.radius))));
+				}
+				p.setOpacity(current.backdropOpacity * current.fade);
+				draw(blurred);
+				p.fillRect(cover->rect(), current.tint);
+				p.setOpacity(1.);
+				p.drawImage(cover->rect(), current.foreground);
+			}
+			Painter p(cover);
+			p.drawImage(QPoint(), state->raster);
+		}, cover->lifetime());
+		cover->show();
+		QObject::connect(
+			static_cast<QRhiWidget*>(widget),
+			&QRhiWidget::renderFailed,
+			cover,
+			[=] { failed(); });
+		QObject::connect(
+			static_cast<QRhiWidget*>(widget),
+			&QRhiWidget::frameSubmitted,
+			cover,
+			[=] {
+				if (state->rendered && !cover->isHidden()) {
+					crl::on_main(cover, [=] {
+						if (state->rendered) {
+							cover->hide();
+							state->raster = QImage();
+							state->frame = TopBarBlurFrame();
+						}
+					});
+				}
+			});
+		return surface;
 	}
 #endif
 	[[maybe_unused]] static const auto logged = [] {
@@ -591,15 +744,6 @@ void BlurBackground::paint() {
 			_surfaceFade = fade;
 			_surface->rpWidget()->update();
 		}
-	} else if (shown && _strength && _surfacePending) {
-		Painter p(_target);
-		PaintBlurBackdrop(
-			p,
-			_target->rect(),
-			_original,
-			Qt::transparent,
-			0.f,
-			0.f);
 	} else if (shown) {
 		const auto tint = _tint();
 		const auto ratio = _target->devicePixelRatioF();
@@ -607,8 +751,11 @@ void BlurBackground::paint() {
 #ifdef Q_OS_WIN
 		opacity = Platform::WindowsBackdropPaintOpacity();
 #endif
+		const auto strength = _strength ? _strength() : 1.f;
 		if (_raster.isNull() || _rasterTint != tint
-			|| _rasterOpacity != opacity || _raster.devicePixelRatioF() != ratio) {
+			|| _rasterOpacity != opacity || _rasterStrength != strength
+			|| _raster.devicePixelRatioF() != ratio) {
+			_rasterStrength = strength;
 			_rasterTint = tint;
 			_rasterOpacity = opacity;
 			_raster = QImage(
@@ -622,7 +769,8 @@ void BlurBackground::paint() {
 				_target->rect(),
 				_image,
 				tint,
-				_tintOpacity);
+				_tintOpacity,
+				strength);
 		}
 		Painter p(_target);
 		if (_strength) {
@@ -646,15 +794,16 @@ void BlurBackground::createSurface() {
 			image.fill(Qt::transparent);
 			return image;
 		}();
+		const auto strength = _strength ? _strength() : 1.f;
 		auto frame = MakeBlurFrame(
 			_image,
 			foreground,
 			_tint(),
 			_target->height(),
 			_tintOpacity,
-			1.f);
+			strength);
 		frame.original = _original;
-		frame.fade = _strength ? _strength() : 1.f;
+		frame.fade = strength;
 		return frame;
 	}, [=] {
 		crl::on_main(this, [=] {

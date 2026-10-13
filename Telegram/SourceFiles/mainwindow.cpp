@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/tooltip.h"
 #include "ui/emoji_config.h"
 #include "ui/ui_utility.h"
+#include "ui/painter.h"
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_instance.h"
 #include "core/sandbox.h"
@@ -69,9 +70,11 @@ public:
 private:
 	void update();
 	void finish();
+	void refreshBackdrop();
 
 	not_null<Ui::LayerStackWidget*> _layer;
 	Ui::RpWidget _widget;
+	QImage _backdrop;
 	HistoryView::BlurTransition _transition;
 	HistoryView::BlurBackground _blur;
 	Fn<void()> _closed;
@@ -88,15 +91,22 @@ LayerBlur::LayerBlur(
 		Fn<void()> closed)
 : _layer(layer)
 , _widget(layer->parentWidget())
+, _backdrop(std::move(backdrop))
 , _transition(st::boxDuration)
 , _blur(&_widget, [=] {
-	return HistoryView::PrepareBlurImage(backdrop, _widget.size(), true);
+	return HistoryView::PrepareBlurImage(_backdrop, _widget.size(), true);
 }, [] { return QColor(Qt::transparent); }, 0.f, [=] {
 	return float(_transition.value(crl::now()));
 })
 , _closed(std::move(closed))
 , _animation([=](crl::time now) {
 	update();
+	if (base::options::value<bool>(HistoryView::kOptionRealtimeBlur)
+		&& base::options::value<bool>(HistoryView::kOptionBlurEffects)
+		&& (_transition.shown() || _transition.animating(now))) {
+		refreshBackdrop();
+		return true;
+	}
 	return _transition.animating(now);
 }) {
 	_widget.setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -106,10 +116,22 @@ LayerBlur::LayerBlur(
 	_layer->events() | rpl::on_next([=](not_null<QEvent*> event) {
 		if (event->type() == QEvent::Show) {
 			update();
+		} else if (event->type() == QEvent::ChildAdded
+			|| event->type() == QEvent::ChildRemoved) {
+			crl::on_main(_layer, [=] { update(); });
 		}
 	}, _lifetime);
 	_layer->sizeValue() | rpl::on_next([=] {
 		_widget.setGeometry(_layer->geometry());
+	}, _lifetime);
+	rpl::merge(
+		base::options::lookup<bool>(HistoryView::kOptionBlurEffects).changes(),
+		base::options::lookup<bool>(HistoryView::kOptionRealtimeBlur).changes()
+	) | rpl::on_next([=] {
+		update();
+		if (base::options::value<bool>(HistoryView::kOptionRealtimeBlur)) {
+			_animation.start();
+		}
 	}, _lifetime);
 	_layer->hideFinishEvents() | rpl::on_next([=] {
 		_finished = true;
@@ -140,6 +162,32 @@ void LayerBlur::update() {
 	}
 	_wasAnimating = animating;
 	finish();
+}
+
+void LayerBlur::refreshBackdrop() {
+	const auto parent = _layer->parentWidget();
+	const auto ratio = parent->devicePixelRatioF();
+	auto image = QImage(parent->size() * ratio, QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(ratio);
+	image.fill(Qt::transparent);
+	{
+		const auto snapshot = HistoryView::BlurSnapshot(parent);
+		Painter p(&image);
+		Ui::RenderWidget(p, parent, QPoint(), parent->rect(), QWidget::DrawWindowBackground);
+		for (const auto child : parent->findChildren<QWidget*>(
+			QString(), Qt::FindDirectChildrenOnly)) {
+			if (child == _layer || child == &_widget
+				|| child->isHidden() || child->isWindow()) {
+				continue;
+			}
+			p.save();
+			p.setClipRect(child->geometry());
+			Ui::RenderWidget(p, child, child->pos(), child->rect());
+			p.restore();
+		}
+	}
+	_backdrop = std::move(image);
+	_blur.invalidate();
 }
 
 void LayerBlur::finish() {
@@ -265,7 +313,9 @@ void MainWindow::clearWidgetsHook() {
 
 QPixmap MainWindow::grabForSlideAnimation() {
 	const auto body = bodyWidget();
-	return body->size().isEmpty() ? QPixmap() : Ui::GrabWidget(body);
+	return body->size().isEmpty()
+		? QPixmap()
+		: HistoryView::GrabBlurSnapshot(body);
 }
 
 void MainWindow::preventOrInvoke(Fn<void()> callback) {
@@ -511,7 +561,7 @@ void MainWindow::ensureLayerCreated() {
 	if (_layer) {
 		return;
 	}
-	const auto backdrop = Ui::GrabWidget(bodyWidget()).toImage();
+	const auto backdrop = HistoryView::GrabBlurSnapshot(bodyWidget()).toImage();
 	_layer = base::make_unique_q<Ui::LayerStackWidget>(
 		bodyWidget(),
 		crl::guard(this, [=] { return controller().uiShow(); }));
@@ -527,9 +577,20 @@ void MainWindow::ensureLayerCreated() {
 		_boxShown = shown;
 	}, _layer->lifetime());
 
-	if (const auto controller = sessionController()) {
-		controller->enableGifPauseReason(Window::GifPauseReason::Layer);
-	}
+	rpl::merge(
+		rpl::single(rpl::empty_value()),
+		base::options::lookup<bool>(HistoryView::kOptionBlurEffects).changes(),
+		base::options::lookup<bool>(HistoryView::kOptionRealtimeBlur).changes()
+	) | rpl::on_next([=] {
+		if (const auto controller = sessionController()) {
+			if (base::options::value<bool>(HistoryView::kOptionBlurEffects)
+				&& base::options::value<bool>(HistoryView::kOptionRealtimeBlur)) {
+				controller->disableGifPauseReason(Window::GifPauseReason::Layer);
+			} else {
+				controller->enableGifPauseReason(Window::GifPauseReason::Layer);
+			}
+		}
+	}, _layer->lifetime());
 }
 
 void MainWindow::destroyLayer() {

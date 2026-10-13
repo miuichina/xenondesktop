@@ -6311,7 +6311,7 @@ void HistoryWidget::showAnimated(
 	_preserveScrollTop = false;
 	_stickerToast = nullptr;
 
-	auto newContentCache = Ui::GrabWidget(this);
+	auto newContentCache = HistoryView::GrabBlurSnapshot(this);
 
 	hideChildWidgets();
 	if (params.withTopBarShadow && !fromBottom) {
@@ -8244,7 +8244,7 @@ QPixmap HistoryWidget::grabForShowAnimation(
 	}
 	_inGrab = true;
 	updateControlsGeometry();
-	auto result = Ui::GrabWidget(this);
+	auto result = HistoryView::GrabBlurSnapshot(this);
 	_inGrab = false;
 	updateControlsGeometry();
 	if (params.withTopBarShadow) {

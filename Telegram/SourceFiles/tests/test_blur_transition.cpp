@@ -7,13 +7,13 @@ int main() {
 	assert(transition.value(0) == 0.);
 	transition.setShown(true, 1000);
 	assert(transition.value(1000) == 0.);
-	assert(std::abs(transition.value(1150) - std::sqrt(.75)) < 1e-12);
+	assert(std::abs(transition.value(1150) - .5) < 1e-12);
 	assert(transition.animating(1299));
 	assert(!transition.animating(1300));
 	assert(transition.value(1300) == 1.);
 	transition.setShown(false, 1400);
 	assert(transition.value(1400) == 1.);
-	assert(std::abs(transition.value(1550) - (1. - std::sqrt(.75))) < 1e-12);
+	assert(std::abs(transition.value(1550) - (1. - .5)) < 1e-12);
 	assert(transition.value(1700) == 0.);
 	auto popup = HistoryView::BlurTransition(200);
 	popup.setShown(true, 1000);
