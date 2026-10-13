@@ -39,7 +39,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force "$env:BUILD_ROOT\Libraries", "$env:BUILD_ROOT\ThirdParty", "$env:GITHUB_WORKSPACE\logs" | Out-Null
           $key = '${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py') }}'
-          "DEPENDENCY_KEY=windows-x64-msvc144-qt6-release-v1-$key" >> $env:GITHUB_ENV
+          "DEPENDENCY_KEY=windows-x64-msvc144-qt6-release-v2-$key" >> $env:GITHUB_ENV
+          "LEGACY_DEPENDENCY_KEY=windows-x64-msvc144-qt6-release-v1-$key" >> $env:GITHUB_ENV
 
       - name: Install ATL for MSVC 14.44
         shell: pwsh
@@ -76,11 +77,18 @@ jobs:
             ${{ env.BUILD_ROOT }}\Libraries
             ${{ env.BUILD_ROOT }}\ThirdParty
           key: ${{ env.DEPENDENCY_KEY }}
+          restore-keys: ${{ env.LEGACY_DEPENDENCY_KEY }}
 
       - name: Prepare dependencies
         shell: pwsh
         run: |
-          & "$env:SOURCE_ROOT\Telegram\build\prepare\win.bat" silent qt6 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\dependencies.log"
+          $prepare = "$env:SOURCE_ROOT\Telegram\build\prepare\win.bat"
+          $rust = "$env:BUILD_ROOT\Libraries\win64\tdesktop_rust"
+          if ((Test-Path "$rust\out\lib\tdesktop_rust.lib") -and !(Test-Path "$rust\out\src\wallet_engine\wallet_engine.cpp")) {
+            & $prepare silent qt6 tlottie wallet-engine tdesktop_rust 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\cache-repair.log"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          & $prepare silent qt6 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\dependencies.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Reduce dependency cache size
@@ -90,7 +98,7 @@ jobs:
           $root = (Resolve-Path "$env:BUILD_ROOT\Libraries").Path
           $files = Get-ChildItem -LiteralPath $root -File -Recurse -Force
           foreach ($file in $files) {
-            if ($file.Extension -match '^\.(lib|a|exe|h|hpp|inc|cmake|pc)$' -or $file.FullName -match '\\(include|objects-[^\\]+|cache_keys|patches|nv-codec-headers)\\') { continue }
+            if ($file.FullName -match '\\tdesktop_rust\\out\\' -or $file.Extension -match '^\.(lib|a|exe|h|hpp|inc|cmake|pc)$' -or $file.FullName -match '\\(include|objects-[^\\]+|cache_keys|patches|nv-codec-headers)\\') { continue }
             if (!$file.FullName.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected cleanup path' }
             Remove-Item -LiteralPath $file.FullName -Force
           }
