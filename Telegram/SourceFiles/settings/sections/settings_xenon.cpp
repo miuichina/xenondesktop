@@ -8,6 +8,7 @@
 #include "settings/settings_builder.h"
 #include "settings/settings_common_session.h"
 #include "window/main_window.h"
+#include "window/window_fps_counter.h"
 #include "window/window_session_controller.h"
 #include "ui/boxes/confirm_box.h"
 #include "core/application.h"
@@ -41,6 +42,20 @@ const auto kMeta = BuildHelper({
 	.title = &tr::lng_settings_xenon,
 	.icon = &st::menuIconStar,
 }, [](SectionBuilder &builder) {
+	auto &showFps = base::options::lookup<bool>(Window::kOptionShowFps);
+	const auto fps = builder.addCheckbox({
+		.id = u"xenon/show_fps"_q,
+		.title = tr::lng_settings_xenon_show_fps(),
+		.checked = showFps.value(),
+		.keywords = { u"fps"_q, u"frames"_q, u"performance"_q },
+	});
+	if (fps) {
+		fps->checkedChanges() | rpl::on_next([option = &showFps](bool checked) {
+			option->set(checked);
+		}, fps->lifetime());
+	}
+	builder.addDividerText(tr::lng_settings_xenon_show_fps_about());
+
 	auto &blurEffects = base::options::lookup<bool>(
 		HistoryView::kOptionBlurEffects);
 	const auto blur = builder.addCheckbox({

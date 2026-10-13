@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/main_window.h"
+#include "window/window_fps_counter.h"
 
 #include "api/api_updates.h"
 #include "storage/localstorage.h"
@@ -494,6 +495,8 @@ MainWindow::MainWindow(not_null<Controller*> controller)
 			updateControlsGeometry();
 		}, _screenReaderBar->lifetime());
 	}
+
+	SetupFpsCounter(body());
 
 	Shortcuts::Listen(this);
 }

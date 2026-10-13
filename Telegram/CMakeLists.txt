@@ -2273,6 +2273,8 @@ PRIVATE
     webauthn/webauthn_common.h
     window/main_window.cpp
     window/main_window.h
+    window/window_fps_counter.cpp
+    window/window_fps_counter.h
     window/notifications_manager.cpp
     window/notifications_manager.h
     window/notifications_manager_default.cpp

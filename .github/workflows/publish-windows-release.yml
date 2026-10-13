@@ -1,0 +1,62 @@
+name: Publish Windows release
+
+"on":
+  workflow_run:
+    workflows: [Windows x64]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Windows build run ID to publish without rebuilding
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.event.workflow_run.id || inputs.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+    steps:
+      - name: Verify the successful build and download its EXE
+        shell: bash
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo 'Invalid run ID'; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > build.json
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .conclusion == "success" and
+            .head_branch == "dev" and
+            .head_repository.full_name == $repo and
+            .path == ".github/workflows/win.yml"
+          ' build.json > /dev/null
+          sha=$(jq -r '.head_sha' build.json)
+          echo "BUILD_SHA=$sha" >> "$GITHUB_ENV"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.commit.message | split("\n")[0]' > title.txt
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name Xenon-Windows-x64-Release --dir release
+          test -s release/Telegram.exe
+          test -s release/Updater.exe
+          (cd release && sha256sum Telegram.exe Updater.exe > SHA256SUMS.txt)
+
+      - name: Publish release
+        shell: bash
+        run: |
+          tag="windows-build-$RUN_ID"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo 'This build already has a release.'
+            exit 0
+          fi
+          printf 'Windows x64 Release\n\nCommit: `%s`\n\n[Build and logs](https://github.com/%s/actions/runs/%s)\n' "$BUILD_SHA" "$GITHUB_REPOSITORY" "$RUN_ID" > notes.md
+          gh release create "$tag" release/Telegram.exe release/Updater.exe release/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$BUILD_SHA" \
+            --title "$(cat title.txt)" --notes-file notes.md --latest

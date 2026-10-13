@@ -10,6 +10,10 @@ using "ui/widgets/widgets.style";
 using "chat_helpers/chat_helpers.style";
 using "boxes/boxes.style"; // UserpicButton
 
+fpsCounterWidth: 220px;
+fpsCounterMargin: 8px;
+fpsCounterPadding: margins(8px, 4px, 8px, 4px);
+
 windowMinWidth: 380px;
 windowMinHeight: 480px;
 windowDefaultWidth: 800px;

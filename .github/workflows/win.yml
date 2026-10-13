@@ -112,7 +112,29 @@ jobs:
             ${{ env.BUILD_ROOT }}\ThirdParty
           key: ${{ env.DEPENDENCY_KEY }}
 
+      - name: Prepare Telegram cache key
+        shell: pwsh
+        run: |
+          $toolset = $env:VCToolsVersion.TrimEnd('\')
+          $sdk = $env:WindowsSDKVersion.TrimEnd('\')
+          $cmake = (cmake --version | Select-Object -First 1).Replace(' ', '-')
+          "BUILD_CACHE_PREFIX=windows-objects-v1-$env:DEPENDENCY_KEY-$toolset-$sdk-$cmake" >> $env:GITHUB_ENV
+
+      - name: Restore Telegram build
+        id: telegram_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ env.SOURCE_ROOT }}\out
+          key: ${{ env.BUILD_CACHE_PREFIX }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ${{ env.BUILD_CACHE_PREFIX }}-
+
+      - name: Restore unchanged source timestamps
+        shell: pwsh
+        run: |
+          & "$env:SOURCE_ROOT\.github\scripts\build-cache-timestamps.ps1" -Mode Restore -SourceRoot "$env:SOURCE_ROOT"
+
       - name: Configure Release
+        id: configure
         shell: pwsh
         env:
           TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
@@ -130,6 +152,19 @@ jobs:
           Get-PSDrive -PSProvider FileSystem | Select-Object Name, Used, Free | Format-Table -AutoSize
           cmake --build "$env:SOURCE_ROOT\out" --config Release --target Telegram Updater --parallel 4 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\build.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Record source timestamps
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & "$env:SOURCE_ROOT\.github\scripts\build-cache-timestamps.ps1" -Mode Capture -SourceRoot "$env:SOURCE_ROOT"
+
+      - name: Save Telegram build
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ env.SOURCE_ROOT }}\out
+          key: ${{ steps.telegram_cache.outputs.cache-primary-key }}
 
       - name: Package executables
         shell: pwsh
