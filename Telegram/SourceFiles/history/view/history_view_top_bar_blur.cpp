@@ -420,19 +420,28 @@ void BlurBackdropCache::paint(
 		|| bounds.width() != area.width() || !bounds.contains(area)) {
 		const auto revision = _revision;
 		bounds = area.adjusted(0, -area.height(), 0, area.height());
+		const auto textureSize = QSize(
+			std::max(int(std::ceil(bounds.width() * scale)), 1),
+			std::max(int(std::ceil(bounds.height() * scale)), 1));
+		const auto ratio = scale * BlurTextureDownscale();
 		image = QImage(
 			QSize(
-				std::max(int(std::ceil(bounds.width() * scale)), 1),
-				std::max(int(std::ceil(bounds.height() * scale)), 1)),
+				std::max(int(std::ceil(bounds.width() * ratio)), 1),
+				std::max(int(std::ceil(bounds.height() * ratio)), 1)),
 			QImage::Format_ARGB32_Premultiplied);
+		image.setDevicePixelRatio(ratio);
 		image.fill(Qt::transparent);
 		{
 			Painter cached(&image);
-			cached.scale(scale, scale);
 			cached.translate(-bounds.topLeft());
 			cached.setClipRect(bounds);
 			render(cached, bounds);
 		}
+		image = image.scaled(
+			textureSize,
+			Qt::IgnoreAspectRatio,
+			Qt::SmoothTransformation);
+		image.setDevicePixelRatio(1.);
 		if (_revision == revision) {
 			_scale = scale;
 			_area = bounds;

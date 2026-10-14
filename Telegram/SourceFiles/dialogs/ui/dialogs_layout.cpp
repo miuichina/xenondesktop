@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/ui/dialogs_layout.h"
+#include "ui/custom_badge.h"
 
 #include "base/options.h"
 #include "base/unixtime.h"
@@ -916,7 +917,8 @@ void PaintRow(
 			? tr::lng_my_notes(tr::now)
 			: tr::lng_hidden_author_messages(tr::now);
 		const auto textWidth = st::semiboldFont->width(text);
-		if (!context.search && (flags & Flag::VerifyCodes)) {
+		if ((!context.search && (flags & Flag::VerifyCodes))
+			|| (Ui::CustomBadge::Width(from) && !(flags & Flag::HiddenAuthor))) {
 			paintPeerBadge(textWidth);
 		}
 		if (textWidth > rectForName.width()) {
@@ -947,7 +949,8 @@ void PaintRow(
 					- st::dialogsMuteIconSkip);
 		}
 		auto badgeWidth = 0;
-		if ((history || sublist) && !context.search) {
+		if (((history || sublist) && !context.search)
+			|| Ui::CustomBadge::Width(from)) {
 			const auto widthBefore = rectForName.width();
 			paintPeerBadge(rowName.maxWidth());
 			badgeWidth = widthBefore - rectForName.width();

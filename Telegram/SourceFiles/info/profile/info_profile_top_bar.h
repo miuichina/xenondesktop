@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/object_ptr.h"
+#include "ui/custom_badge.h"
 #include "info/info_controller.h" // Key
 #include "info/profile/info_profile_badge.h"
 #include "info/profile/tabs/info_profile_tab_top_bar_bindings.h"
@@ -260,6 +261,8 @@ private:
 	const std::unique_ptr<Badge> _botVerify;
 	rpl::variable<Badge::Content> _badgeContent;
 	const Fn<bool()> _gifPausedChecker;
+	Ui::CustomBadge _customBadge;
+	object_ptr<Ui::AbstractButton> _customBadgeView = { nullptr };
 	const std::unique_ptr<Badge> _badge;
 	const std::unique_ptr<Badge> _verified;
 

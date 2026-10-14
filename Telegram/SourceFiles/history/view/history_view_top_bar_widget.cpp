@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_top_bar_widget.h"
+#include "ui/custom_badge.h"
 #include "history/view/history_view_top_bar_blur.h"
 
 #include "history/history.h"
@@ -218,6 +219,9 @@ TopBarWidget::TopBarWidget(
 		}, lifetime());
 	}
 
+	session().customBadges().updated() | rpl::on_next([=] {
+		update();
+	}, lifetime());
 	using UpdateFlag = Data::PeerUpdate::Flag;
 	session().changes().peerUpdates(
 		UpdateFlag::HasCalls
@@ -714,6 +718,23 @@ void TopBarWidget::paintTopBar(Painter &p) {
 		const auto opacity = folder ? _titleShownRatio : 1.;
 		if (opacity > 0.) {
 			const auto textWidth = st::historySavedFont->width(text);
+			if (peer && _activeChat.section == Section::History) {
+				namewidth -= _titleBadge.drawGetWidth(p, {
+					.peer = peer,
+					.rectForName = QRect(
+						nameleft,
+						(height() - st::historySavedFont->height) / 2,
+						namewidth,
+						st::historySavedFont->height),
+					.nameWidth = textWidth,
+					.outerWidth = width(),
+					.premiumFg = &st::dialogsVerifiedIconBg,
+					.customEmojiRepaint = [=] { update(); },
+					.now = now,
+					.paused = _controller->isGifPausedAtLeastFor(
+						Window::GifPauseReason::Any),
+				});
+			}
 			if (namewidth < textWidth) {
 				text = st::historySavedFont->elided(text, namewidth);
 			}
@@ -921,6 +942,14 @@ void TopBarWidget::mousePressEvent(QMouseEvent *e) {
 		&& (e->pos().y() < st::topBarHeight)
 		&& !showSelectedState()
 		&& !_chooseForReportReason;
+	if (handleClick && _titleBadge.customBadgeRect().contains(e->pos())) {
+		if (const auto peer = titleNamePeer()) {
+			if (const auto info = peer->session().customBadges().lookup(peer)) {
+				_controller->showToast(info->description());
+				return;
+			}
+		}
+	}
 	if (handleClick) {
 		const auto archiveTop = (_activeChat.section == Section::ChatsList)
 			&& _activeChat.key.folder();
@@ -986,12 +1015,12 @@ void TopBarWidget::setActiveChat(
 		!= activeChat.key.history());
 
 	_activeChat = activeChat;
+	_titleBadge.unload();
 	_titlePeerText.clear();
 	_back->clearState();
 	update();
 
 	if (peerChanged || topicChanged) {
-		_titleBadge.unload();
 		_titleNameVersion = 0;
 		_emojiInteractionSeen = nullptr;
 		_activeChatLifetime.destroy();

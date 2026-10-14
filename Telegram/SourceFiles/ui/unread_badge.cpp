@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/unread_badge.h"
+#include "ui/custom_badge.h"
 
 #include "data/data_emoji_statuses.h"
 #include "data/data_peer.h"
@@ -236,6 +237,37 @@ PeerBadge::PeerBadge() = default;
 PeerBadge::~PeerBadge() = default;
 
 int PeerBadge::drawGetWidth(Painter &p, Descriptor &&descriptor) {
+	const auto nameWidth = descriptor.nameWidth;
+	const auto customWidth = CustomBadge::Width(descriptor.peer);
+	descriptor.rectForName.setWidth(descriptor.rectForName.width() - customWidth);
+	const auto standardWidth = drawStandardBadge(p, descriptor);
+	if (!customWidth) {
+		_customBadge = nullptr;
+		return standardWidth;
+	}
+	if (!_customBadge) {
+		_customBadge = std::make_unique<CustomBadge>();
+	}
+	const auto rect = descriptor.rectForName;
+	const auto left = rect.x()
+		+ std::max(0, std::min(nameWidth, rect.width() - standardWidth))
+		+ standardWidth;
+	_customBadge->paint(
+		p,
+		descriptor.peer,
+		style::rtlrect(QRect(left, rect.y(), customWidth, rect.height()), descriptor.outerWidth),
+		descriptor.premiumFg ? (*descriptor.premiumFg)->c : p.pen().color(),
+		descriptor.now,
+		descriptor.paused,
+		descriptor.customEmojiRepaint);
+	return standardWidth + customWidth;
+}
+
+QRect PeerBadge::customBadgeRect() const {
+	return _customBadge ? _customBadge->rect() : QRect();
+}
+
+int PeerBadge::drawStandardBadge(Painter &p, Descriptor &descriptor) {
 	Expects(descriptor.customEmojiRepaint != nullptr);
 
 	const auto peer = descriptor.peer;
@@ -429,6 +461,7 @@ void PeerBadge::paintEmojiStatusFrame(
 }
 
 void PeerBadge::unload() {
+	_customBadge = nullptr;
 	_emojiStatus = nullptr;
 }
 

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_inner_widget.h"
+#include "ui/custom_badge.h"
 
 #include "dialogs/dialogs_three_state_icon.h"
 #include "dialogs/ui/chat_search_empty.h"
@@ -491,6 +492,9 @@ InnerWidget::InnerWidget(
 	}, lifetime());
 
 	using UpdateFlag = Data::PeerUpdate::Flag;
+	session().customBadges().updated() | rpl::on_next([=] {
+		update();
+	}, lifetime());
 	session().changes().peerUpdates(
 		UpdateFlag::Name
 		| UpdateFlag::Photo
@@ -2462,6 +2466,7 @@ void InnerWidget::processGlobalForceClick(QPoint globalPosition) {
 void InnerWidget::mousePressEvent(QMouseEvent *e) {
 	selectByMouse(e->globalPos());
 
+	_dragStart = e->pos();
 	_pressButton = e->button();
 	setPressed(_selected, _selectedTopicJump, _selectedRightButton);
 	setCollapsedPressed(_collapsedSelected);
@@ -3068,6 +3073,47 @@ void InnerWidget::mousePressReleased(
 	}
 	updateSelectedRow();
 	if (!wasDragging && button == Qt::LeftButton) {
+		const auto position = mapFromGlobal(globalPosition);
+		const auto showBadge = [&](not_null<PeerData*> peer, const Ui::PeerBadge &badge, int top) {
+			const auto rect = badge.customBadgeRect().translated(0, top);
+			if (rect.contains(position) && rect.contains(_dragStart)) {
+				if (const auto info = peer->session().customBadges().lookup(peer)) {
+					ClickHandler::unpressed();
+					_controller->showToast(info->description());
+					return true;
+				}
+			}
+			return false;
+		};
+		if (pressed && pressed == _selected) {
+			if (const auto peer = pressed->key().peer()) {
+				if (showBadge(peer, pressed->entry()->chatListPeerBadge(), dialogsOffset() + pressed->top())) {
+					return;
+				}
+			}
+		} else if (filteredPressed >= 0 && filteredPressed == _filteredSelected) {
+			const auto &result = _filterResults[filteredPressed];
+			if (const auto peer = result.row->key().peer()) {
+				if (showBadge(peer, result.row->entry()->chatListPeerBadge(), filteredOffset() + result.top)) {
+					return;
+				}
+			}
+		} else if (peerSearchPressed >= 0 && peerSearchPressed == _peerSearchSelected) {
+			const auto &result = _peerSearchResults[peerSearchPressed];
+			if (showBadge(result->peer, result->badge, peerSearchOffset() + peerSearchPressed * st::dialogsRowHeight)) {
+				return;
+			}
+		} else if (searchedPressed >= 0 && searchedPressed == _searchedSelected) {
+			const auto &row = _searchResults[searchedPressed];
+			const auto item = row->item();
+			const auto peer = row->searchInChat()
+				? item->displayFrom()
+				: item->history()->peer.get();
+			if (peer && showBadge(peer, row->badge(), searchedOffset() + searchedPressed * _st->height)) {
+				return;
+			}
+		}
+
 		if ((collapsedPressed >= 0 && collapsedPressed == _collapsedSelected)
 			|| (pressed
 				&& pressed == _selected

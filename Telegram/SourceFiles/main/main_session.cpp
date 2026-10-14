@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_session.h"
+#include "ui/custom_badge.h"
 
 #include "apiwrap.h"
 #include "api/api_peer_colors.h"
@@ -185,6 +186,7 @@ Session::Session(
 , _fastButtonsBots(std::make_unique<Support::FastButtonsBots>(this))
 , _saveSettingsTimer([=] { saveSettings(); }) {
 	Expects(_settings != nullptr);
+	_customBadges = std::make_unique<Ui::CustomBadges>(this);
 
 	_api->requestTermsUpdate();
 	_api->requestFullPeer(_user);

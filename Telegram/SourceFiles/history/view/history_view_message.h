@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "ui/custom_badge.h"
+
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_bottom_info.h"
 #include "iv/markdown/iv_markdown_article.h"
@@ -542,6 +544,7 @@ private:
 	mutable std::unique_ptr<CommentsButton> _comments;
 	mutable std::unique_ptr<TranscribeButton> _summarize;
 
+	mutable std::unique_ptr<Ui::CustomBadge> _customBadge;
 	mutable Ui::Text::String _fromName;
 	mutable std::unique_ptr<FromNameStatus> _fromNameStatus;
 	mutable std::unique_ptr<Ui::RoundCheckbox> _selectionRoundCheckbox;

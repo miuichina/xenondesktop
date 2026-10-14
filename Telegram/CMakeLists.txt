@@ -2195,6 +2195,8 @@ PRIVATE
     ui/rows_scroll_cache.h
     ui/top_background_gradient.cpp
     ui/top_background_gradient.h
+    ui/custom_badge.cpp
+    ui/custom_badge.h
     ui/unread_badge.cpp
     ui/unread_badge.h
     ui/peer/video_userpic_player.cpp
@@ -2443,6 +2445,7 @@ if (WIN32)
         target_link_libraries(Telegram PRIVATE desktop-app::win_directx_helper)
     endif()
 
+    target_link_libraries(Telegram PRIVATE Dnsapi)
     target_link_options(Telegram PRIVATE /PDBPAGESIZE:8192)
 elseif (APPLE)
     if (NOT DESKTOP_APP_USE_PACKAGED)

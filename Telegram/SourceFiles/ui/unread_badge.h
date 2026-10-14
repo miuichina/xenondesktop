@@ -16,6 +16,8 @@ struct VerifiedBadge;
 
 namespace Ui {
 
+class CustomBadge;
+
 class UnreadBadge : public RpWidget {
 public:
 	using RpWidget::RpWidget;
@@ -68,6 +70,7 @@ public:
 	};
 	int drawGetWidth(Painter &p, Descriptor &&descriptor);
 	[[nodiscard]] QRect emojiStatusRect() const;
+	[[nodiscard]] QRect customBadgeRect() const;
 	void paintEmojiStatusFrame(QPainter &p, crl::time now, bool paused);
 	void paintEmojiStatusFrame(
 		QPainter &p,
@@ -93,11 +96,13 @@ private:
 	struct BotVerifiedData;
 
 	int drawTextBadge(Painter &p, const Descriptor &descriptor);
+	int drawStandardBadge(Painter &p, Descriptor &descriptor);
 	int drawVerifyCheck(Painter &p, const Descriptor &descriptor);
 	int drawPremiumEmojiStatus(Painter &p, const Descriptor &descriptor);
 	int drawPremiumStar(Painter &p, const Descriptor &descriptor);
 
 	std::unique_ptr<EmojiStatus> _emojiStatus;
+	std::unique_ptr<CustomBadge> _customBadge;
 	mutable std::unique_ptr<BotVerifiedData> _botVerifiedData;
 
 };

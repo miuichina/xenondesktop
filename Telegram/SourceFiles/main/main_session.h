@@ -82,6 +82,7 @@ class AttachWebView;
 } // namespace InlineBots
 
 namespace Ui {
+class CustomBadges;
 struct ColorIndicesCompressed;
 } // namespace Ui
 
@@ -311,6 +312,8 @@ public:
 	[[nodiscard]] auto colorIndicesValue()
 		-> rpl::producer<Ui::ColorIndicesCompressed>;
 
+	[[nodiscard]] Ui::CustomBadges &customBadges() const { return *_customBadges; }
+
 private:
 	static constexpr auto kDefaultSaveDelay = crl::time(1000);
 
@@ -365,6 +368,7 @@ private:
 	const std::unique_ptr<Support::Helper> _supportHelper;
 	const std::unique_ptr<Support::FastButtonsBots> _fastButtonsBots;
 
+	std::unique_ptr<Ui::CustomBadges> _customBadges;
 	std::shared_ptr<QImage> _selfUserpicView;
 	rpl::variable<bool> _premiumPossible = false;
 	bool _messagePrimaryEditedDate = false;

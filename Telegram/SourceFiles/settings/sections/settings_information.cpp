@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_information.h"
+#include "ui/custom_badge.h"
+#include "settings/sections/settings_premium.h"
 
 #include "settings/sections/settings_main.h"
 #include "settings/settings_builder.h"
@@ -67,6 +69,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "base/random.h"
 #include "styles/style_chat.h" // popupMenuExpandedSeparator
+#include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
 #include "styles/style_menu_icons.h"
@@ -308,6 +311,34 @@ void SetupPhoto(
 		wrap,
 		Info::Profile::NameValue(self),
 		st::settingsCoverName);
+	const auto premium = name->lifetime().make_state<Info::Profile::Badge>(
+		wrap,
+		st::settingsInfoPeerBadge,
+		&self->session(),
+		Info::Profile::BadgeContentForPeer(self),
+		nullptr,
+		[=] { return controller->isGifPausedAtLeastFor(Window::GifPauseReason::Layer); });
+	premium->setPremiumClickCallback([=] {
+		ShowEmojiStatusPremium(controller, self);
+	});
+	const auto custom = Ui::CreateChild<Ui::AbstractButton>(wrap);
+	const auto renderer = custom->lifetime().make_state<Ui::CustomBadge>();
+	custom->setClickedCallback([=] {
+		if (const auto info = self->session().customBadges().lookup(self)) {
+			controller->showToast(info->description());
+		}
+	});
+	custom->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(custom);
+		renderer->paint(
+			p,
+			self,
+			custom->rect(),
+			st::settingsCoverName.textFg->c,
+			crl::now(),
+			controller->isGifPausedAtLeastFor(Window::GifPauseReason::Layer),
+			crl::guard(custom, [=] { custom->update(); }));
+	}, custom->lifetime());
 	const auto status = Ui::CreateChild<Ui::FlatLabel>(
 		wrap,
 		StatusValue(self),
@@ -317,12 +348,15 @@ void SetupPhoto(
 		wrap->widthValue(),
 		photo->widthValue(),
 		Info::Profile::NameValue(self),
-		status->widthValue()
+		status->widthValue(),
+		rpl::single(rpl::empty) | rpl::then(rpl::merge(
+			premium->updated(), self->session().customBadges().updated()))
 	) | rpl::on_next([=](
 			int max,
 			int photoWidth,
 			const QString&,
-			int statusWidth) {
+			int statusWidth,
+			const auto &) {
 		photo->moveToLeft(
 			(max - photoWidth) / 2,
 			st::settingsInfoPhotoTop);
@@ -333,10 +367,23 @@ void SetupPhoto(
 				+ st::settingsInfoUploadLeft),
 			photo->y() + photo->height() - upload->height());
 		const auto skip = st::settingsButton.iconLeft;
-		name->resizeToNaturalWidth(max - 2 * skip);
+		const auto premiumView = premium->widget();
+		const auto premiumWidth = premiumView
+			? premiumView->width() + st::settingsInfoPeerBadge.position.x()
+			: 0;
+		const auto customWidth = Ui::CustomBadge::Width(self);
+		const auto badgeWidth = premiumWidth + customWidth;
+		name->resizeToNaturalWidth(max - 2 * skip - badgeWidth);
 		name->moveToLeft(
-			(max - name->width()) / 2,
+			(max - name->width() - badgeWidth) / 2,
 			(photo->y() + photo->height() + st::settingsInfoPhotoSkip));
+		premium->move(name->x() + name->width(), name->y(), name->y() + name->height());
+		custom->setVisible(customWidth > 0);
+		custom->resize(customWidth, st::emojiSize);
+		custom->moveToLeft(
+			name->x() + name->width() + premiumWidth,
+			name->y() + (name->height() - custom->height()) / 2);
+		custom->update();
 		status->moveToLeft(
 			(max - statusWidth) / 2,
 			(name->y() + name->height() + st::settingsInfoNameSkip));

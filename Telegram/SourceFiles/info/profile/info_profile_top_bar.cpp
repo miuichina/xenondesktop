@@ -487,6 +487,27 @@ TopBar::TopBar(
 	_title->setContextCopyText(tr::lng_profile_copy_fullname(tr::now));
 	_title->setSelectable(true);
 
+	_customBadgeView.create(this);
+	_customBadgeView->setClickedCallback([=] {
+		if (const auto info = _peer->session().customBadges().lookup(_peer)) {
+			controller->showToast(info->description());
+		}
+	});
+	_customBadgeView->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(_customBadgeView);
+		_customBadge.paint(
+			p,
+			_peer,
+			_customBadgeView->rect(),
+			_title->st().textFg->c,
+			crl::now(),
+			_gifPausedChecker(),
+			crl::guard(_customBadgeView.data(), [=] { _customBadgeView->update(); }));
+	}, _customBadgeView->lifetime());
+	_peer->session().customBadges().updated() | rpl::on_next([=] {
+		updateLabelsPosition();
+		_customBadgeView->update();
+	}, lifetime());
 	auto badgeUpdates = rpl::producer<rpl::empty_value>();
 	if (_badge) {
 		badgeUpdates = rpl::merge(
@@ -1959,7 +1980,13 @@ void TopBar::updateTitlePosition(float64 progressCurrent) {
 	const auto verifiedWidget = _verified ? _verified->widget() : nullptr;
 	const auto badgeWidget = _badge ? _badge->widget() : nullptr;
 	const auto botVerifyWidget = _botVerify ? _botVerify->widget() : nullptr;
-	auto badgesWidth = 0;
+	const auto customWidth = _topic
+		? 0 : Ui::CustomBadge::Width(_peer);
+	if (_customBadgeView) {
+		_customBadgeView->setVisible(customWidth > 0);
+		_customBadgeView->resize(customWidth, st::emojiSize);
+	}
+	auto badgesWidth = customWidth;
 	if (verifiedWidget) {
 		badgesWidth += verifiedWidget->width();
 	}
@@ -1990,7 +2017,7 @@ void TopBar::updateTitlePosition(float64 progressCurrent) {
 	const auto badgeBottom = titleTop + _title->height();
 	const auto margins = LargeCustomEmojiMargins();
 
-	auto totalElementsWidth = _title->width();
+	auto totalElementsWidth = _title->width() + customWidth;
 	const auto botVerifySkip = botVerifyWidget
 		? botVerifyWidget->width() + st::infoVerifiedCheckPosition.x()
 		: 0;
@@ -2022,6 +2049,14 @@ void TopBar::updateTitlePosition(float64 progressCurrent) {
 	const auto badgeLeft = titleLeft + _title->width();
 	if (_badge) {
 		_badge->move(badgeLeft, badgeTop, badgeBottom);
+	}
+	if (_customBadgeView) {
+		_customBadgeView->moveToLeft(
+			badgeLeft
+				+ (badgeWidget ? badgeWidget->width() : 0)
+				+ (verifiedWidget ? verifiedWidget->width() : 0)
+				+ ((badgeWidget || verifiedWidget) ? st::infoVerifiedCheckPosition.x() : 0),
+			badgeTop + (badgeBottom - badgeTop - _customBadgeView->height()) / 2);
 	}
 	if (_verified) {
 		_verified->move(

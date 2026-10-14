@@ -547,6 +547,10 @@ struct Message::FromNameStatus {
 	int skip = 0;
 };
 
+struct CustomBadgeLink : RuntimeComponent<CustomBadgeLink, Element> {
+	ClickHandlerPtr link;
+};
+
 struct Message::RightAction {
 	std::unique_ptr<Ui::RippleAnimation> ripple;
 	ClickHandlerPtr link;
@@ -637,7 +641,8 @@ Message::Message(
 }
 
 Message::~Message() {
-	if (_comments || (_fromNameStatus && _fromNameStatus->custom)) {
+	if (_customBadge || _comments || (_fromNameStatus && _fromNameStatus->custom)) {
+		_customBadge = nullptr;
 		_comments = nullptr;
 		_fromNameStatus = nullptr;
 		checkHeavyPart();
@@ -1597,6 +1602,7 @@ QSize Message::performCountOptimalSize() {
 					: item->displayHiddenSenderInfo()->nameText();
 				auto namew = st::msgPadding.left()
 					+ name.maxWidth()
+					+ Ui::CustomBadge::Width(from)
 					+ (_fromNameStatus
 						? st::dialogsPremiumIcon.icon.width()
 						: 0)
@@ -2526,6 +2532,8 @@ void Message::paintFromName(
 		}
 		return &info->nameText();
 	}();
+	const auto customWidth = Ui::CustomBadge::Width(from);
+	availableWidth -= customWidth;
 	const auto statusWidth = _fromNameStatus
 		? st::dialogsPremiumIcon.icon.width()
 		: 0;
@@ -2576,6 +2584,25 @@ void Message::paintFromName(
 			st::dialogsPremiumIcon.icon.paint(p, x, y, width(), color);
 		}
 	}
+	if (customWidth && availableWidth >= statusWidth && from) {
+		clearCustomEmojiRepaint();
+		if (!_customBadge) {
+			_customBadge = std::make_unique<Ui::CustomBadge>();
+			history()->owner().registerHeavyViewPart(const_cast<Message*>(this));
+		}
+		_customBadge->paint(
+			p,
+			from,
+			QRect(
+				availableLeft + std::min(nameAvailableWidth, nameText->maxWidth()) + statusWidth,
+				trect.top(),
+				customWidth,
+				st::msgNameFont->height),
+			nameFg,
+			context.now,
+			context.paused,
+			[=] { const_cast<Message*>(this)->customEmojiRepaint(); });
+	}
 	p.setFont(st::msgNameFont);
 	p.setPen(nameFg);
 	const auto nameLinkHandler = fromLink();
@@ -2601,7 +2628,8 @@ void Message::paintFromName(
 		.availableWidth = nameAvailableWidth,
 		.elisionLines = 1,
 	});
-	const auto skipWidth = nameWidth
+	availableWidth += customWidth;
+	const auto skipWidth = nameWidth + customWidth
 		+ (_fromNameStatus
 			? (st::dialogsPremiumIcon.icon.width()
 				+ st::msgServiceFont->spacew)
@@ -3817,12 +3845,14 @@ void Message::createTopicButtonRipple() {
 
 bool Message::hasHeavyPart() const {
 	return _comments
+		|| _customBadge
 		|| (_fromNameStatus && _fromNameStatus->custom)
 		|| Element::hasHeavyPart();
 }
 
 void Message::unloadHeavyPart() {
 	Element::unloadHeavyPart();
+	_customBadge = nullptr;
 	_comments = nullptr;
 	if (_fromNameStatus) {
 		_fromNameStatus->custom = nullptr;
@@ -4240,6 +4270,8 @@ bool Message::getStateFromName(
 			}
 		}();
 
+		const auto customWidth = Ui::CustomBadge::Width(from);
+		availableWidth -= customWidth;
 		const auto statusWidth = (from && _fromNameStatus)
 			? st::dialogsPremiumIcon.icon.width()
 			: 0;
@@ -4256,6 +4288,26 @@ bool Message::getStateFromName(
 		const auto nameWidth = std::min(
 			nameText->maxWidth(),
 			nameAvailableWidth);
+		const auto customLeft = availableLeft + nameWidth + statusWidth;
+		if (customWidth && availableWidth >= statusWidth
+			&& point.x() >= customLeft && point.x() < customLeft + customWidth) {
+			const auto that = const_cast<Message*>(this);
+			if (!Has<CustomBadgeLink>()) {
+				that->AddComponents(CustomBadgeLink::Bit());
+			}
+			const auto badge = that->Get<CustomBadgeLink>();
+			if (!badge->link) {
+				badge->link = std::make_shared<LambdaClickHandler>([=](ClickContext context) {
+					if (const auto controller = ExtractController(context)) {
+						if (const auto info = from->session().customBadges().lookup(from)) {
+							controller->showToast(info->description());
+						}
+					}
+				});
+			}
+			outResult->link = badge->link;
+			return true;
+		}
 		if (statusWidth && availableWidth > statusWidth) {
 			const auto x = availableLeft
 				+ nameWidth
@@ -4278,7 +4330,8 @@ bool Message::getStateFromName(
 			return true;
 		}
 
-		const auto skipWidth = nameWidth
+		availableWidth += customWidth;
+		const auto skipWidth = nameWidth + customWidth
 			+ (_fromNameStatus
 				? (st::dialogsPremiumIcon.icon.width()
 					+ st::msgServiceFont->spacew)
@@ -6430,6 +6483,7 @@ void Message::fromNameUpdated(int width) const {
 		return;
 	}
 	const auto available = width
+		- Ui::CustomBadge::Width(from)
 		- st::msgPadding.left()
 		- st::msgPadding.right()
 		- (_fromNameStatus

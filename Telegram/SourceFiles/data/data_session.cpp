@@ -5602,6 +5602,19 @@ void Session::registerItemView(not_null<ViewElement*> view) {
 	_views[view->data()].push_back(view);
 }
 
+void Session::refreshCustomBadges() {
+	auto ids = std::vector<FullMsgId>();
+	ids.reserve(_views.size());
+	for (const auto &[item, views] : _views) {
+		ids.push_back(item->fullId());
+	}
+	for (const auto id : ids) {
+		if (const auto item = message(id)) {
+			requestItemViewRefresh(item);
+		}
+	}
+}
+
 void Session::unregisterItemView(not_null<ViewElement*> view) {
 	Expects(!_heavyViewParts.contains(view));
 
