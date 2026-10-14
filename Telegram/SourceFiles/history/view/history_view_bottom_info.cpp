@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_bottom_info.h"
 
+#include "ayu/deleted_messages.h"
+
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style.h"
 #include "ui/effects/reaction_fly_animation.h"
@@ -543,6 +545,9 @@ void BottomInfo::layoutDateText() {
 			.textColor = false,
 		})).append("  ");
 	}
+	if (_data.flags & Data::Flag::Deleted) {
+		marked.append(AyuMessages::DeletedMarkText()).append(' ');
+	}
 	marked.append(full);
 	_authorEditedDate.setMarkedText(
 		st::msgDateTextStyle,
@@ -749,6 +754,9 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 		if (item->isSilent()) {
 			result.flags |= Flag::Silent;
 		}
+	}
+	if (item->isDeleted()) {
+		result.flags |= Flag::Deleted;
 	}
 	if (!forwarded) {
 		return result;

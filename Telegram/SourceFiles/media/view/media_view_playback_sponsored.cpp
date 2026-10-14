@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_view_playback_sponsored.h"
 
+#include "base/options.h"
 #include "boxes/premium_preview_box.h"
 #include "data/components/sponsored_messages.h"
 #include "data/data_file_origin.h"
@@ -561,6 +562,14 @@ PlaybackSponsored::PlaybackSponsored(
 , _itemId(item->fullId())
 , _controlsGeometry(controls->geometryValue())
 , _timer([=] { update(); }) {
+	base::options::lookup<bool>(Data::kOptionHideAds).changes(
+	) | rpl::on_next([=] {
+		if (base::options::value<bool>(Data::kOptionHideAds)) {
+			_widget.reset();
+			finish();
+			setPausedInside(false);
+		}
+	}, lifetime());
 	_session->sponsoredMessages().requestForVideo(item, crl::guard(this, [=](
 			Data::SponsoredForVideo data) {
 		if (data.list.empty()) {

@@ -24,6 +24,34 @@ add_subdirectory(codegen)
 get_filename_component(src_loc SourceFiles REALPATH)
 get_filename_component(res_loc Resources REALPATH)
 
+target_sources(Telegram PRIVATE
+    ${src_loc}/ayu/ui/boxes/edit_mark_box.cpp
+    ${src_loc}/ayu/ui/boxes/edit_mark_box.h
+    ${src_loc}/ayu/deleted_messages.cpp
+    ${src_loc}/ayu/deleted_messages.h
+    ${src_loc}/ayu/data/ayu_database.cpp
+    ${src_loc}/ayu/data/ayu_database.h
+    ${src_loc}/ayu/data/entities.h
+    ${src_loc}/ayu/data/messages_storage.cpp
+    ${src_loc}/ayu/data/messages_storage.h
+    ${src_loc}/ayu/libs/sqlite/sqlite3.c
+    ${src_loc}/ayu/libs/sqlite/sqlite3.h
+    ${src_loc}/ayu/libs/sqlite/sqlite_orm.h
+    ${src_loc}/ayu/ui/message_history/history_inner.cpp
+    ${src_loc}/ayu/ui/message_history/history_inner.h
+    ${src_loc}/ayu/ui/message_history/history_item.cpp
+    ${src_loc}/ayu/ui/message_history/history_item.h
+    ${src_loc}/ayu/ui/message_history/history_section.cpp
+    ${src_loc}/ayu/ui/message_history/history_section.h
+    ${src_loc}/ayu/utils/ayu_mapper.cpp
+    ${src_loc}/ayu/utils/ayu_mapper.h
+)
+
+set_source_files_properties(${src_loc}/ayu/libs/sqlite/sqlite3.c PROPERTIES
+    SKIP_PRECOMPILE_HEADERS ON
+)
+target_include_directories(Telegram PRIVATE ${src_loc}/ayu/libs/sqlite)
+
 include(cmake/telegram_options.cmake)
 include(cmake/lib_ffmpeg.cmake)
 include(cmake/lib_stripe.cmake)

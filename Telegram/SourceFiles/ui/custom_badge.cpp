@@ -205,10 +205,19 @@ void CustomBadge::paint(
 		_document = info->document;
 		_type = info->type;
 		_color = color;
-		_emoji = _document
-			? peer->session().data().customEmojiManager().create(
-				Data::SerializeCustomEmojiId(_document), repaint)
-			: std::make_unique<BadgeGlyph>(_type == 0);
+		if (_document) {
+			const auto size = std::min(st::emojiSize, st::msgNameFont->height);
+			const auto skip = (st::emojiSize - size) / 2;
+			_emoji = MakeWrappedEmoji<Text::ShiftedEmoji>(
+				peer->session().data().customEmojiManager().create(
+					_document,
+					repaint,
+					Data::CustomEmojiSizeTag::Normal,
+					size),
+				QPoint(skip, skip));
+		} else {
+			_emoji = std::make_unique<BadgeGlyph>(_type == 0);
+		}
 		if (_type == 0 || _type == 3) {
 			_emoji = Premium::MakeCollectibleEmoji(
 				QStringView(),

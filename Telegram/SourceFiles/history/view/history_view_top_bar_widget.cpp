@@ -578,6 +578,7 @@ void TopBarWidget::setBlurBackdrop(Fn<QImage()> backdrop) {
 
 void TopBarWidget::updateBlurSurface() {
 	const auto enabled = OptionBlurEffects.value()
+		&& !IsBlurSnapshotActive()
 		&& _blurBackdrop
 		&& !_animatingMode
 		&& !_blurGpuFailed

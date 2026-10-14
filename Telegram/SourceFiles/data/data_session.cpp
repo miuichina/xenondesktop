@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_session.h"
 
+#include "ayu/deleted_messages.h"
+
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "main/main_app_config.h"
@@ -3239,9 +3241,17 @@ void Session::checkTTLs() {
 		}
 		expired.insert(expired.end(), items.begin(), items.end());
 	}
-	if (!expired.empty()) {
-		notifyItemsAboutToBeDestroyed(expired);
-		for (const auto &item : expired) {
+	auto toDestroy = std::vector<not_null<HistoryItem*>>();
+	for (const auto &item : expired) {
+		if (AyuMessages::IsMessageSavable(item)) {
+			AyuMessages::ProcessMessageDelete(item);
+		} else {
+			toDestroy.push_back(item);
+		}
+	}
+	if (!toDestroy.empty()) {
+		notifyItemsAboutToBeDestroyed(toDestroy);
+		for (const auto &item : toDestroy) {
 			item->destroy();
 		}
 	}
@@ -3373,8 +3383,13 @@ void Session::processMessagesDeleted(
 	for (const auto &messageId : data) {
 		const auto i = list ? list->find(messageId.v) : Messages::iterator();
 		if (list && i != list->end()) {
-			const auto history = i->second->history();
-			toDestroy.push_back(i->second);
+			const auto item = i->second;
+			const auto history = item->history();
+			if (AyuMessages::IsMessageSavable(item)) {
+				AyuMessages::ProcessMessageDelete(item);
+			} else {
+				toDestroy.push_back(item);
+			}
 			historiesToCheck.emplace(history);
 		} else if (affected) {
 			affected->unknownMessageDeleted(messageId.v);
@@ -3399,7 +3414,11 @@ void Session::processNonChannelMessagesDeleted(const QVector<MTPint> &data) {
 	for (const auto &messageId : data) {
 		if (const auto item = nonChannelMessage(messageId.v)) {
 			const auto history = item->history();
-			toDestroy.push_back(item);
+			if (AyuMessages::IsMessageSavable(item)) {
+				AyuMessages::ProcessMessageDelete(item);
+			} else {
+				toDestroy.push_back(item);
+			}
 			historiesToCheck.emplace(history);
 		}
 	}

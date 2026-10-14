@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_media_grouped.h"
 
+#include "ayu/deleted_messages.h"
+
 #include "history/history_item_components.h"
 #include "history/history_item.h"
 #include "history/history.h"
@@ -30,6 +32,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace HistoryView {
 namespace {
+
+constexpr auto kDeletedFadeDuration = crl::time(500);
 
 [[nodiscard]] bool IsHostedInstantViewMedia(not_null<const Element*> parent) {
 	return parent->Get<InstantViewMediaRuntime>() != nullptr;
@@ -444,6 +448,26 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 	const auto tagged = lookupSpoilerTagMedia();
 	auto fullRect = QRect();
 	const auto subpartHighlight = IsSubGroupSelection(highlight);
+	auto anyDeleted = false;
+	const auto perItemOpacityEnabled = AyuMessages::SemiTransparentDeletedMessages();
+	if (!perItemOpacityEnabled) {
+		for (const auto &part : _parts) {
+			part.deletedAnimation.stop();
+		}
+	}
+	if (perItemOpacityEnabled) {
+		for (const auto &part : _parts) {
+			if (part.item->isDeleted()) {
+				anyDeleted = true;
+			}
+		}
+	}
+	const auto perItemDeletedOpacity = perItemOpacityEnabled
+		&& anyDeleted;
+	const auto elementDeletedOpacity = perItemDeletedOpacity
+		? _parent->deletedOpacity()
+		: 1.;
+
 	for (auto i = 0, count = int(_parts.size()); i != count; ++i) {
 		const auto &part = _parts[i];
 		auto partContext = context.withSelection(fullSelection
@@ -470,15 +494,50 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 		if (!part.cache.isNull()) {
 			wasCache = true;
 		}
-		part.content->drawGrouped(
-			p,
-			partContext,
-			part.geometry.translated(0, groupPadding.top()),
-			part.sides,
-			applyRoundingSides(rounding, part.sides),
-			highlightOpacity,
-			&part.cacheKey,
-			&part.cache);
+		if (perItemDeletedOpacity && part.item->isDeleted()) {
+			if (part.item->wasDeletedAnimated()
+				&& !part.deletedAnimation.animating()) {
+				part.deletedAnimation.start(
+					[parent = _parent] {
+						if (!AyuMessages::SemiTransparentDeletedMessages()) {
+							return false;
+						}
+						parent->repaint();
+						return true;
+					},
+					1.,
+					0.7,
+					kDeletedFadeDuration,
+					anim::easeOutCubic);
+				part.item->markDeletedAnimated();
+			}
+			const auto itemOpacity = part.deletedAnimation.value(0.7);
+			const auto adjustedOpacity = (elementDeletedOpacity > 0.)
+				? (itemOpacity / elementDeletedOpacity)
+				: 0.;
+			const auto savedOp = p.opacity();
+			p.setOpacity(savedOp * adjustedOpacity);
+			part.content->drawGrouped(
+				p,
+				partContext,
+				part.geometry.translated(0, groupPadding.top()),
+				part.sides,
+				applyRoundingSides(rounding, part.sides),
+				highlightOpacity,
+				&part.cacheKey,
+				&part.cache);
+			p.setOpacity(savedOp);
+		} else {
+			part.content->drawGrouped(
+				p,
+				partContext,
+				part.geometry.translated(0, groupPadding.top()),
+				part.sides,
+				applyRoundingSides(rounding, part.sides),
+				highlightOpacity,
+				&part.cacheKey,
+				&part.cache);
+		}
 		if (!part.cache.isNull()) {
 			nowCache = true;
 		}

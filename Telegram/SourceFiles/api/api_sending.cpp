@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_sending.h"
 
+#include "ayu/deleted_messages.h"
+
 #include "api/api_text_entities.h"
 #include "base/random.h"
 #include "base/unixtime.h"
@@ -189,6 +191,10 @@ void SendExistingMedia(
 	const auto peer = history->peer;
 	const auto session = &history->session();
 	const auto api = &session->api();
+	AyuMessages::PrepareDeletedReply(
+		history,
+		message.textWithTags,
+		message.action.replyTo);
 	const auto welcomeTemplate = message.action.options.welcomeTemplate;
 
 	if (welcomeTemplate
@@ -1139,6 +1145,12 @@ struct ConfirmedLocalFile {
 	const auto isEditing = (file->type != SendMediaType::Audio)
 		&& (file->type != SendMediaType::Round)
 		&& (file->to.replaceMediaOf != 0);
+	if (!isEditing && !file->to.options.welcomeTemplate) {
+		AyuMessages::PrepareDeletedReply(
+			session->data().history(file->to.peer),
+			file->caption,
+			file->to.replyTo);
+	}
 	const auto newId = FullMsgId(
 		file->to.peer,
 		(isEditing

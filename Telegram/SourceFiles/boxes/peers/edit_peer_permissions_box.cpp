@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_info_box.h"
 #include "boxes/edit_privacy_box.h"
 #include "settings/settings_power_saving.h"
+#include "settings/sections/settings_xenon.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "main/main_session.h"
@@ -55,6 +56,10 @@ constexpr auto kSlowmodeValues = 8;
 constexpr auto kBoostsUnrestrictValues = 5;
 constexpr auto kForceDisableTooltipDuration = 3 * crl::time(1000);
 constexpr auto kDefaultChargeStars = 10;
+
+[[nodiscard]] auto Dependencies(uint32) {
+	return std::vector<std::pair<uint32, uint32>>{};
+}
 
 [[nodiscard]] auto Dependencies(PowerSaving::Flags)
 -> std::vector<std::pair<PowerSaving::Flag, PowerSaving::Flag>> {
@@ -1567,5 +1572,34 @@ EditFlagsControl<Data::ChatbotsPermissions> CreateEditChatbotPermissions(
 		std::move(descriptor));
 	result.widget = std::move(widget);
 
+	return result;
+}
+
+EditFlagsControl<uint32> CreateEditSendConfirmations(
+		QWidget *parent,
+		uint32 flags) {
+	auto widget = object_ptr<Ui::VerticalLayout>(parent);
+	auto descriptor = EditFlagsDescriptor<uint32>{
+		.labels = { {
+			rpl::single(u"Send confirmations"_q),
+			{
+				{
+					uint32(Settings::SendConfirmation::Gifs),
+					u"GIFs"_q,
+					&st::menuIconChatBubble,
+				},
+				{ uint32(Settings::SendConfirmation::Stickers), u"Stickers"_q },
+				{ uint32(Settings::SendConfirmation::Voice), u"Voice messages"_q },
+				{ uint32(Settings::SendConfirmation::Messages), u"Messages"_q },
+				{ uint32(Settings::SendConfirmation::Media), u"Media"_q },
+			},
+		} },
+		.st = &st::powerSavingButton,
+	};
+	auto result = CreateEditFlags(
+		widget.data(),
+		flags,
+		std::move(descriptor));
+	result.widget = std::move(widget);
 	return result;
 }

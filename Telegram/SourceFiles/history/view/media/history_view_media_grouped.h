@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "history/view/media/history_view_media.h"
+
+#include "ui/effects/animations.h"
 #include "data/data_document.h"
 #include "data/data_photo.h"
 
@@ -125,6 +127,7 @@ private:
 		RectParts sides = RectPart::None;
 		QRect initialGeometry;
 		QRect geometry;
+		mutable Ui::Animations::Simple deletedAnimation;
 		mutable uint64 cacheKey = 0;
 		mutable QPixmap cache;
 

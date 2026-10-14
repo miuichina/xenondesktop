@@ -762,7 +762,9 @@ void MainWindow::initHook() {
 }
 
 void EnsureWindowsAcrylic(QWidget *widget) {
-	if (!widget->isWindow() || widget->property("xenonWindowsBackdrop").toBool()) {
+	if (!widget->isWindow()
+		|| dynamic_cast<Ui::PopupMenu*>(widget)
+		|| widget->property("xenonWindowsBackdrop").toBool()) {
 		return;
 	}
 	const auto parent = widget->parentWidget();

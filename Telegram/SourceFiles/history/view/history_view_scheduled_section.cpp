@@ -61,6 +61,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localimageloader.h"
 #include "inline_bots/inline_bot_result.h"
 #include "lang/lang_keys.h"
+#include "settings/sections/settings_xenon.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_boxes.h"
@@ -647,6 +648,23 @@ bool ScheduledWidget::confirmSendingFiles(
 void ScheduledWidget::sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options) {
+	const auto confirmation = Settings::BundleSendConfirmation(*bundle);
+	if (confirmation
+		&& Settings::ConfirmSend(
+			controller(),
+			*confirmation,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendingFilesConfirmed(bundle, copy);
+			}))) {
+		return;
+	}
+
 	if (showSendingFilesError(*bundle)) {
 		return;
 	}
@@ -706,10 +724,22 @@ void ScheduledWidget::uploadFile(
 		const QByteArray &fileContent,
 		SendMediaType type) {
 	const auto callback = [=](Api::SendOptions options) {
-		session().api().sendFile(
-			fileContent,
-			type,
-			prepareSendAction(options));
+		const auto send = crl::guard(this, [=, history = _history] {
+			if (_history != history) {
+				return;
+			}
+			session().api().sendFile(
+				fileContent,
+				type,
+				prepareSendAction(options));
+		});
+		if (!Settings::ConfirmSend(
+				controller(),
+				Settings::SendConfirmation::Media,
+				options.sendConfirmed,
+				send)) {
+			send();
+		}
 	};
 	controller()->show(
 		PrepareScheduleBox(this, _show, sendMenuDetails(), callback));
@@ -769,6 +799,21 @@ void ScheduledWidget::send() {
 }
 
 void ScheduledWidget::send(Api::SendOptions options) {
+	if (Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				send(copy);
+			}))) {
+		return;
+	}
+
 	const auto webPageDraft = _composeControls->webPageDraft();
 
 	auto message = Api::MessageToSend(prepareSendAction(options));
@@ -800,6 +845,23 @@ void ScheduledWidget::sendVoice(const Controls::VoiceToSend &data) {
 void ScheduledWidget::sendVoice(
 		const Controls::VoiceToSend &data,
 		Api::SendOptions options) {
+	if (Settings::ConfirmSend(
+			controller(),
+			data.video
+				? Settings::SendConfirmation::Media
+				: Settings::SendConfirmation::Voice,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendVoice(data, copy);
+			}))) {
+		return;
+	}
+
 	session().api().sendVoiceMessage(
 		data.bytes,
 		data.waveform,
@@ -894,6 +956,21 @@ void ScheduledWidget::edit(
 bool ScheduledWidget::sendExistingDocument(
 		not_null<DocumentData*> document,
 		Api::MessageToSend messageToSend) {
+	if (Settings::ConfirmSend(
+			controller(),
+			Settings::DocumentSendConfirmation(document),
+			messageToSend.action.options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = messageToSend;
+				copy.action.options.sendConfirmed = true;
+				sendExistingDocument(document, std::move(copy));
+			}))) {
+		return false;
+	}
+
 	const auto error = Data::RestrictionError(
 		_history->peer,
 		ChatRestriction::SendStickers);
@@ -923,6 +1000,21 @@ void ScheduledWidget::sendExistingPhoto(not_null<PhotoData*> photo) {
 bool ScheduledWidget::sendExistingPhoto(
 		not_null<PhotoData*> photo,
 		Api::SendOptions options) {
+	if (Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Media,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendExistingPhoto(photo, copy);
+			}))) {
+		return false;
+	}
+
 	const auto error = Data::RestrictionError(
 		_history->peer,
 		ChatRestriction::SendPhotos);
@@ -958,6 +1050,25 @@ void ScheduledWidget::sendInlineResult(
 		std::shared_ptr<InlineBots::Result> result,
 		not_null<UserData*> bot,
 		Api::SendOptions options) {
+	if (Settings::ConfirmSend(
+			controller(),
+			result->document()
+				? Settings::DocumentSendConfirmation(result->document())
+				: result->hasMedia()
+				? Settings::SendConfirmation::Media
+				: Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendInlineResult(result, bot, copy);
+			}))) {
+		return;
+	}
+
 	auto action = prepareSendAction(options);
 	action.generateLocal = true;
 	session().api().sendInlineResult(

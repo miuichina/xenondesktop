@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/rp_widget.h"
+#include "ui/effects/spoiler_mess.h"
 #include "base/weak_ptr.h"
 
 #include <QtGui/QImage>
@@ -13,6 +14,8 @@ namespace HistoryView {
 
 inline constexpr auto kOptionRealtimeBlur = "xenon-realtime-blur";
 
+[[nodiscard]] bool IsBlurSnapshotActive();
+
 class BlurSnapshot final {
 public:
 	explicit BlurSnapshot(not_null<QWidget*> source);
@@ -21,7 +24,8 @@ public:
 	BlurSnapshot &operator=(const BlurSnapshot&) = delete;
 
 private:
-	std::vector<QPointer<Ui::RpWidget>> _covers;
+	Ui::SpoilerAnimationSnapshot _spoilers;
+	std::vector<QPointer<QWidget>> _surfaces;
 
 };
 

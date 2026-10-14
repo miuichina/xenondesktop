@@ -316,6 +316,13 @@ InnerWidget::InnerWidget(
 
 	_communityViewable.setRepaint([=] { update(); });
 
+	base::options::lookup<bool>(Data::kOptionHideAds).changes(
+	) | rpl::on_next([=] {
+		if (base::options::value<bool>(Data::kOptionHideAds)) {
+			hideSponsoredSearchResults();
+		}
+	}, lifetime());
+
 	style::PaletteChanged(
 	) | rpl::on_next([=] {
 		_topicJumpCache = nullptr;
@@ -4471,6 +4478,24 @@ void InnerWidget::clearSearchResults(bool alsoPeerSearchResults) {
 	}
 	_searchResults.clear();
 	_searchedCount = _searchedMigratedCount = 0;
+}
+
+void InnerWidget::hideSponsoredSearchResults() {
+	for (const auto &result : _peerSearchResults) {
+		if (result->sponsored
+			&& _pressedRightButtonData == &result->sponsored->button) {
+			_pressedRightButtonData = nullptr;
+			_pressedRightButton = false;
+		}
+	}
+	_peerSearchSelected = -1;
+	_peerSearchPressed = -1;
+	_peerSearchMenu = -1;
+	_peerSearchResults.erase(ranges::remove_if(
+		_peerSearchResults,
+		[](const auto &result) { return result->sponsored != nullptr; }
+	), end(_peerSearchResults));
+	refresh();
 }
 
 void InnerWidget::clearPeerSearchResults() {

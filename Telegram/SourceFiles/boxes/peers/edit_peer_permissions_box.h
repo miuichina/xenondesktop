@@ -133,3 +133,7 @@ using AdminRightLabel = EditFlagsLabel<ChatAdminRights>;
 	QWidget *parent,
 	Data::ChatbotsPermissions flags
 ) -> EditFlagsControl<Data::ChatbotsPermissions>;
+
+[[nodiscard]] EditFlagsControl<uint32> CreateEditSendConfirmations(
+	QWidget *parent,
+	uint32 flags);

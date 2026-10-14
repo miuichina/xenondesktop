@@ -28,6 +28,8 @@ class RpWidget;
 
 namespace Data {
 
+inline constexpr auto kOptionHideAds = "xenon-hide-ads";
+
 class MediaPreload;
 
 struct SponsoredReportResult final {
@@ -235,6 +237,7 @@ private:
 	[[nodiscard]] SponsoredForVideo prepareForVideo(
 		not_null<PeerData*> peer);
 	void clearOldRequests();
+	void clearAds();
 
 	const Entry *find(const FullMsgId &fullId) const;
 
@@ -251,6 +254,7 @@ private:
 	rpl::event_stream<FullMsgId> _itemRemoved;
 
 	rpl::lifetime _lifetime;
+	rpl::lifetime _settingsLifetime;
 
 };
 

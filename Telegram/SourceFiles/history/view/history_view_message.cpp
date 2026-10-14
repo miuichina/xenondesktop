@@ -1919,6 +1919,12 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 		}
 	}
 
+	const auto deletedFade = deletedOpacity();
+	const auto savedOpacityForDeleted = p.opacity();
+	if (deletedFade < 1.) {
+		p.setOpacity(savedOpacityForDeleted * deletedFade);
+	}
+
 	const auto roll = media ? media->bubbleRoll() : Media::BubbleRoll();
 	if (roll) {
 		p.save();
@@ -2282,6 +2288,9 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 		p.translate(-g.topLeft());
 	}
 
+	if (deletedFade < 1.) {
+		p.setOpacity(savedOpacityForDeleted);
+	}
 	p.restoreTextPalette();
 
 	if (context.highlightPathCache

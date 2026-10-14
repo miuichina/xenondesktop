@@ -104,6 +104,7 @@ struct HistoryItemCommonFields {
 	bool ignoreForwardFrom = false;
 	bool ignoreForwardCaptions = false;
 	bool mediaSpoiler = false;
+	TimeId editDate = 0;
 };
 
 enum class HistoryReactionSource : char {
@@ -254,6 +255,11 @@ public:
 	void invalidateChatListEntry();
 
 	void destroy();
+	void setDeleted();
+	[[nodiscard]] bool isDeleted() const;
+	[[nodiscard]] bool wasDeletedAnimated() const;
+	void markDeletedAnimated();
+	void applyTTL(TimeId destroyAt);
 	[[nodiscard]] bool out() const {
 		return _flags & MessageFlag::Outgoing;
 	}
@@ -783,8 +789,6 @@ private:
 	void applyTTL(const MTPDmessage &data);
 	void applyTTL(const MTPDmessageService &data);
 
-	void applyTTL(TimeId destroyAt);
-
 	// For an invoice button we replace the button text with a "Receipt" key.
 	// It should show the receipt for the payed invoice. Still let mobile apps do that.
 	void replaceBuyWithReceiptInMarkup();
@@ -834,6 +838,8 @@ private:
 	int _boostsApplied = 0;
 	int _starsPaid = 0;
 	BusinessShortcutId _shortcutId = 0;
+	bool _deleted : 1 = false;
+	bool _deletedAnimated : 1 = false;
 
 	MessageGroupId _groupId = MessageGroupId();
 	EffectId _effectId = 0;

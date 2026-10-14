@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history.h"
 
+#include "ayu/deleted_messages.h"
+
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_item_preview.h"
 #include "history/view/history_view_translate_tracker.h"
@@ -4238,11 +4240,19 @@ void History::insertMessageToBlocks(not_null<HistoryItem*> item) {
 	for (auto blockIndex = blocks.size(); blockIndex > 0;) {
 		const auto &block = blocks[--blockIndex];
 		for (auto itemIndex = block->messages.size(); itemIndex > 0;) {
-			if (block->messages[--itemIndex]->data()->date() <= itemDate) {
+			const auto previous = block->messages[--itemIndex]->data();
+			if (previous->date() < itemDate
+				|| (previous->date() == itemDate
+					&& (!item->isDeleted() || previous->id <= item->id))) {
 				++itemIndex;
 				addNewInTheMiddle(item, blockIndex, itemIndex);
 				const auto lastDate = chatListTimeId();
-				if (!lastDate || itemDate >= lastDate) {
+				if (!lastDate
+					|| itemDate > lastDate
+					|| (itemDate == lastDate
+						&& (!item->isDeleted()
+							|| !lastMessage()
+							|| item->id > lastMessage()->id))) {
 					setLastMessage(item);
 					owner().notifyHistoryChangeDelayed(this);
 				}
@@ -4259,6 +4269,14 @@ void History::insertMessageToBlocks(not_null<HistoryItem*> item) {
 void History::checkLocalMessages() {
 	if (isEmpty() && (!loadedAtTop() || !loadedAtBottom())) {
 		return;
+	}
+	const auto minId = loadedAtTop()
+		? 0
+		: std::max(minMsgId().bare - 1, int64(0));
+	const auto maxId = loadedAtBottom() ? 0 : maxMsgId().bare + 1;
+	const auto restored = AyuMessages::RestoreDeletedMessages(this, minId, maxId);
+	for (const auto item : restored) {
+		insertMessageToBlocks(item);
 	}
 	const auto firstDate = loadedAtTop()
 		? 0

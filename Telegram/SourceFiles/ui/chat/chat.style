@@ -1377,3 +1377,9 @@ toastCheckIcon: icon {{ "toast/check-36x36", toastFg }};
 
 historySummaryStars: icon {{ "chat/summary_stars-24x24", msgServiceFg }};
 historySummaryArrows: icon {{ "chat/summary_arrows-24x24", msgServiceFg }};
+
+messageDeletedIconEmoji: IconEmoji {
+	icon: icon{{ "ayu/trash_bin", windowFg }};
+	padding: margins(0px, 0px, 0px, 0px);
+	useIconColor: false;
+}

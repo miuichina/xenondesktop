@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_histories.h"
 
+#include "ayu/data/messages_storage.h"
+#include "ayu/deleted_messages.h"
+
 #include "api/api_text_entities.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/components/ephemeral_messages.h"
@@ -1007,10 +1010,16 @@ void Histories::deleteMessages(const MessageIdsList &ids, bool revoke) {
 				_owner->session().ephemeralMessages().deleteMessage(item);
 				continue;
 			}
-			remove.push_back(item);
-			if (item->isRegular()) {
+			if (item->isDeleted()) {
+				AyuMessages::removeDeletedMessage(item);
+			} else if (item->isRegular()) {
 				idsByPeer[history].push_back(MTP_int(itemId.msg));
+				if (AyuMessages::IsMessageSavable(item)) {
+					AyuMessages::ProcessMessageDelete(item);
+					continue;
+				}
 			}
+			remove.push_back(item);
 		}
 	}
 

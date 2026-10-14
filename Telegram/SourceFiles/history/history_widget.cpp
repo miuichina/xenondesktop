@@ -165,6 +165,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_timecode_action.h"
 #include "mtproto/mtproto_config.h"
 #include "lang/lang_keys.h"
+#include "settings/sections/settings_xenon.h"
 #include "settings/business/settings_quick_replies.h"
 #include "settings/settings_credits_graphics.h"
 #include "storage/localimageloader.h"
@@ -2186,6 +2187,7 @@ void HistoryWidget::orderWidgets() {
 	_expand->raise();
 	_richDraftPreview->raise();
 	_discardRichDraft->raise();
+	_topBar->raise();
 	_topBars->raise();
 	if (_businessBotStatus) {
 		_businessBotStatus->bar().raise();
@@ -5830,6 +5832,23 @@ Api::SendAction HistoryWidget::prepareSendAction(
 }
 
 void HistoryWidget::sendVoice(const VoiceToSend &data) {
+	if (Settings::ConfirmSend(
+			controller(),
+			data.video
+				? Settings::SendConfirmation::Media
+				: Settings::SendConfirmation::Voice,
+			data.options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = data;
+				copy.options.sendConfirmed = true;
+				sendVoice(copy);
+			}))) {
+		return;
+	}
+
 	if (!canWriteMessage() || data.bytes.isEmpty() || !_history) {
 		return;
 	}
@@ -5892,6 +5911,22 @@ void HistoryWidget::send(Api::SendOptions options) {
 void HistoryWidget::sendRichDraft(
 		std::shared_ptr<const Iv::RichPage> page,
 		Api::SendOptions options) {
+	if (page != nullptr
+		&& Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendRichDraft(page, copy);
+			}))) {
+		return;
+	}
+
 	if (!page) {
 		return;
 	}
@@ -6012,6 +6047,26 @@ void HistoryWidget::sendTextWithTags(
 		bool useWebPageDraft,
 		Api::SendOptions options,
 		Fn<void()> done) {
+	if (!textWithTags.text.trimmed().isEmpty()
+		&& Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendTextWithTags(
+					textWithTags,
+					useWebPageDraft,
+					copy,
+					done);
+			}))) {
+		return;
+	}
+
 	if (!options.scheduled) {
 		_cornerButtons.clearReplyReturns();
 	}
@@ -6031,7 +6086,11 @@ void HistoryWidget::sendTextWithTags(
 	const auto withPaymentApproved = [=](int approved) {
 		auto copy = options;
 		copy.starsApproved = approved;
-		sendTextWithTags(textWithTags, useWebPageDraft, copy, done);
+		sendTextWithTags(
+					textWithTags,
+					useWebPageDraft,
+					copy,
+					done);
 	};
 	if (showSendMessageError(
 			message.textWithTags,
@@ -6650,6 +6709,21 @@ void HistoryWidget::sendBotCommand(const Bot::SendCommandRequest &request) {
 void HistoryWidget::sendBotCommand(
 		const Bot::SendCommandRequest &request,
 		Api::SendOptions options) {
+	if (Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendBotCommand(request, copy);
+			}))) {
+		return;
+	}
+
 	// replyTo != 0 from ReplyKeyboardMarkup, == 0 from command links
 	if (_peer != request.peer.get()) {
 		return;
@@ -8058,6 +8132,23 @@ bool HistoryWidget::confirmSendingFiles(
 void HistoryWidget::sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options) {
+	const auto confirmation = Settings::BundleSendConfirmation(*bundle);
+	if (confirmation
+		&& Settings::ConfirmSend(
+			controller(),
+			*confirmation,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendingFilesConfirmed(bundle, copy);
+			}))) {
+		return;
+	}
+
 	if (!_peer || showSendingFilesError(*bundle)) {
 		return;
 	}
@@ -8201,7 +8292,19 @@ void HistoryWidget::uploadFile(
 		SendMediaType type) {
 	if (!canWriteMessage()) return;
 
-	session().api().sendFile(fileContent, type, prepareSendAction({}));
+	const auto send = crl::guard(this, [=, history = _history] {
+		if (_history != history) {
+			return;
+		}
+		session().api().sendFile(fileContent, type, prepareSendAction({}));
+	});
+	if (!Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Media,
+			false,
+			send)) {
+		send();
+	}
 }
 
 void HistoryWidget::handleHistoryChange(not_null<const History*> history) {
@@ -9495,6 +9598,25 @@ bool HistoryWidget::showSlowmodeError() {
 }
 
 void HistoryWidget::sendInlineResult(InlineBots::ResultSelected result) {
+	if (Settings::ConfirmSend(
+			controller(),
+			result.result->document()
+				? Settings::DocumentSendConfirmation(result.result->document())
+				: result.result->hasMedia()
+				? Settings::SendConfirmation::Media
+				: Settings::SendConfirmation::Messages,
+			result.options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = result;
+				copy.options.sendConfirmed = true;
+				sendInlineResult(copy);
+			}))) {
+		return;
+	}
+
 	if (!_peer || !_canSendMessages) {
 		return;
 	} else if (showSlowmodeError()) {
@@ -10161,6 +10283,21 @@ bool HistoryWidget::sendExistingDocument(
 		not_null<DocumentData*> document,
 		Api::MessageToSend messageToSend,
 		std::optional<MsgId> localId) {
+	if (Settings::ConfirmSend(
+			controller(),
+			Settings::DocumentSendConfirmation(document),
+			messageToSend.action.options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = messageToSend;
+				copy.action.options.sendConfirmed = true;
+				sendExistingDocument(document, std::move(copy), localId);
+			}))) {
+		return false;
+	}
+
 	const auto ephemeralReply = session().ephemeralMessages()
 		.isEphemeralBotReply(messageToSend.action.replyTo.messageId);
 	const auto error = (_peer && !ephemeralReply)
@@ -10212,6 +10349,21 @@ bool HistoryWidget::sendExistingDocument(
 bool HistoryWidget::sendExistingPhoto(
 		not_null<PhotoData*> photo,
 		Api::SendOptions options) {
+	if (Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Media,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendExistingPhoto(photo, copy);
+			}))) {
+		return false;
+	}
+
 	const auto ephemeralReply = session().ephemeralMessages()
 		.isEphemeralBotReply(replyTo().messageId);
 	const auto error = (_peer && !ephemeralReply)
@@ -11697,7 +11849,8 @@ void HistoryWidget::updateComposeBlur() {
 	_fieldStyle->textBgActive = _fieldStyle->textBg;
 	_field->setAttribute(Qt::WA_OpaquePaintEvent, !transparent);
 	if (enabled && !_composeBlurGpuFailed
-		&& !_composeBlurSurface && !_composeBlurCreatePending) {
+		&& !_composeBlurSurface && !_composeBlurCreatePending
+		&& !HistoryView::IsBlurSnapshotActive()) {
 		_composeBlurCreatePending = true;
 		crl::on_main(this, [=] {
 			_composeBlurCreatePending = false;
@@ -11710,7 +11863,8 @@ void HistoryWidget::updateComposeBlur() {
 	}
 	if (_composeBlurSurface) {
 		_composeBlurSurface->rpWidget()->setGeometry(area);
-		_composeBlurSurface->rpWidget()->setVisible(enabled);
+		_composeBlurSurface->rpWidget()->setVisible(
+			enabled && !HistoryView::IsBlurSnapshotActive());
 		if (enabled) {
 			HistoryView::UpdateBlurForeground(
 				_composeBlurForeground,

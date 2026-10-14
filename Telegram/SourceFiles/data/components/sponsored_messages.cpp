@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_text_entities.h"
 #include "api/api_peer_search.h" // SponsoredSearchResult
 #include "apiwrap.h"
+#include "base/options.h"
 #include "core/click_handler_types.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
@@ -28,6 +29,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Data {
 namespace {
+
+base::options::toggle OptionHideAds({
+	.id = kOptionHideAds,
+	.name = "Hide ads",
+});
 
 constexpr auto kMs = crl::time(1000);
 constexpr auto kRequestTimeLimit = 5 * 60 * crl::time(1000);
@@ -56,6 +62,11 @@ template <typename Fields>
 SponsoredMessages::SponsoredMessages(not_null<Main::Session*> session)
 : _session(session)
 , _clearTimer([=] { clearOldRequests(); }) {
+	OptionHideAds.changes() | rpl::on_next([=] {
+		if (OptionHideAds.value()) {
+			clearAds();
+		}
+	}, _settingsLifetime);
 	Data::AmPremiumValue(
 		_session
 	) | rpl::on_next([=](bool premium) {
@@ -73,6 +84,10 @@ SponsoredMessages::~SponsoredMessages() {
 
 void SponsoredMessages::clear() {
 	_lifetime.destroy();
+	clearAds();
+}
+
+void SponsoredMessages::clearAds() {
 	for (const auto &request : base::take(_requests)) {
 		_session->api().request(request.second.requestId).cancel();
 	}
@@ -80,6 +95,13 @@ void SponsoredMessages::clear() {
 		_session->api().request(request.second.requestId).cancel();
 	}
 	base::take(_data);
+	_dataForVideo.clear();
+	for (const auto &[peer, request] : base::take(_requestsForVideo)) {
+		_session->api().request(request.requestId).cancel();
+		for (const auto &callback : request.callbacks) {
+			callback({});
+		}
+	}
 }
 
 void SponsoredMessages::clearOldRequests() {
@@ -302,6 +324,9 @@ HistoryItem *SponsoredMessages::injectItem(
 }
 
 bool SponsoredMessages::canHaveFor(not_null<History*> history) const {
+	if (OptionHideAds.value()) {
+		return false;
+	}
 	if (history->peer->isChannel()) {
 		return true;
 	} else if (const auto user = history->peer->asUser()) {
@@ -311,7 +336,8 @@ bool SponsoredMessages::canHaveFor(not_null<History*> history) const {
 }
 
 bool SponsoredMessages::canHaveFor(not_null<HistoryItem*> item) const {
-	return item->history()->peer->isBroadcast()
+	return !OptionHideAds.value()
+		&& item->history()->peer->isBroadcast()
 		&& item->isRegular();
 }
 
@@ -728,6 +754,9 @@ void SponsoredMessages::view(const FullMsgId &fullId) {
 }
 
 void SponsoredMessages::view(const QByteArray &randomId) {
+	if (OptionHideAds.value()) {
+		return;
+	}
 	auto &request = _viewRequests[randomId];
 	if (request.requestId || TooEarlyForRequest(request.lastReceived)) {
 		return;

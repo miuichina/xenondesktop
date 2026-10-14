@@ -30,6 +30,8 @@
 namespace HistoryView {
 namespace {
 
+auto BlurSnapshotDepth = 0;
+
 base::options::toggle OptionRealtimeBlur({
 	.id = kOptionRealtimeBlur,
 	.name = "Real-time blur",
@@ -360,22 +362,28 @@ void BlurRenderer::releaseResources() {
 } // namespace
 
 BlurSnapshot::BlurSnapshot(not_null<QWidget*> source) {
+	++BlurSnapshotDepth;
 	for (const auto child : source->findChildren<QWidget*>()) {
 		const auto cover = dynamic_cast<BlurCover*>(child);
-		if (cover && cover->isHidden()
-			&& cover->parentWidget()->isVisibleTo(source)) {
-			_covers.push_back(cover);
-			cover->show();
+		if (cover && cover->parentWidget()->isVisibleTo(source)) {
+			const auto surface = cover->parentWidget();
+			_surfaces.push_back(surface);
+			surface->hide();
 		}
 	}
 }
 
 BlurSnapshot::~BlurSnapshot() {
-	for (const auto &cover : _covers) {
-		if (cover) {
-			cover->hide();
+	--BlurSnapshotDepth;
+	for (const auto &surface : _surfaces) {
+		if (surface) {
+			surface->show();
 		}
 	}
+}
+
+bool IsBlurSnapshotActive() {
+	return BlurSnapshotDepth != 0;
 }
 
 QPixmap GrabBlurSnapshot(not_null<QWidget*> source, QRect rect) {
@@ -565,6 +573,11 @@ std::unique_ptr<Ui::RpWidgetWrap> CreateTopBarBlur(
 		QWidget *parent,
 		Fn<TopBarBlurFrame()> frame,
 		Fn<void()> failed) {
+#ifdef Q_OS_WIN
+	if (parent && parent->window()->testAttribute(Qt::WA_TranslucentBackground)) {
+		return nullptr;
+	}
+#endif // Q_OS_WIN
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 	if (Ui::GL::WidgetsRhiSupported()) {
 		struct StartupState {
@@ -725,7 +738,8 @@ void BlurBackground::paint() {
 		const auto translucent = _target->window()->property("xenonWindowsBackdrop").toBool();
 		_target->setAttribute(Qt::WA_OpaquePaintEvent, shown && !translucent);
 	}
-	if (shown && !_surface && !_failed && !_surfacePending) {
+	if (shown && !_surface && !_failed && !_surfacePending
+		&& !IsBlurSnapshotActive()) {
 		_surfacePending = true;
 		crl::on_main(this, [=] {
 			_surfacePending = false;
@@ -735,7 +749,7 @@ void BlurBackground::paint() {
 			}
 		});
 	}
-	if (_surface) {
+	if (_surface && !IsBlurSnapshotActive()) {
 		_surface->rpWidget()->setGeometry(_target->rect());
 		_surface->rpWidget()->setVisible(shown);
 		const auto tint = _tint();

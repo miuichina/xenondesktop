@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_item.h"
 
+#include "ayu/deleted_messages.h"
+
 #include "api/api_premium.h"
 #include "api/api_sensitive_content.h"
 #include "api/api_transcribes.h"
@@ -109,6 +111,9 @@ template <typename T>
 [[nodiscard]] bool ShowTtlMediaAsExpired(
 		not_null<HistoryItem*> item,
 		const MTPMessageMedia &media) {
+	if (AyuMessages::SaveDeletedMessages()) {
+		return false;
+	}
 	if (item->out() || item->hasUnreadMediaFlag()) {
 		return false;
 	}
@@ -1883,6 +1888,10 @@ bool HistoryItem::isTtlCoveredMedia() const {
 	const auto media = _media.get();
 	if (!media || !media->ttlSeconds()) {
 		return false;
+	} else if (!hasUnreadMediaFlag()
+		&& !Has<HistoryServiceSelfDestruct>()
+		&& AyuMessages::SaveDeletedMessages()) {
+		return false;
 	} else if (media->photo()) {
 		return true;
 	} else if (const auto document = media->document()) {
@@ -2395,6 +2404,7 @@ void HistoryItem::clearMainView() {
 }
 
 void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
+	AyuMessages::SaveMessageRevision(this, edition);
 	history()->session().ephemeralMessages().revertAnchored(this);
 
 	int keyboardTop = -1;
@@ -2791,6 +2801,11 @@ void HistoryItem::applyStreamedDraftFinish(const MTPDmessage &data) {
 }
 
 void HistoryItem::applySentMessage(const MTPDmessage &data) {
+	if (data.vedit_date()) {
+		AyuMessages::SaveMessageRevision(
+			this,
+			HistoryMessageEdition(&_history->session(), data));
+	}
 	history()->session().ephemeralMessages().revertAnchored(this);
 
 	if (data.is_invert_media()) {
@@ -3050,6 +3065,11 @@ void HistoryItem::clearMediaAsExpired() {
 		return;
 	}
 	unarmMediaDestroy();
+	if (AyuMessages::SaveDeletedMessages()) {
+		RemoveComponents(HistoryServiceSelfDestruct::Bit());
+		_history->owner().requestItemViewRefresh(this);
+		return;
+	}
 	auto &owner = _history->owner();
 	if (const auto document = media->document()) {
 		document->cancel();
@@ -3348,6 +3368,10 @@ void HistoryItem::setRealId(MsgId newId) {
 }
 
 bool HistoryItem::canPin() const {
+	if (isDeleted()) {
+		return false;
+	}
+
 	if (!isRegular() || isService()) {
 		return false;
 	} else if (const auto m = media(); m && m->call()) {
@@ -3385,6 +3409,10 @@ bool HistoryItem::isTooOldForEdit(TimeId now) const {
 }
 
 bool HistoryItem::allowsEdit(TimeId now) const {
+	if (isDeleted()) {
+		return false;
+	}
+
 	const auto richPageSource = Get<HistoryMessageRichPageSource>();
 	const auto richPage = BestRichPage(richPageSource);
 	return !isService()
@@ -3405,6 +3433,10 @@ bool HistoryItem::allowsEditMedia() const {
 }
 
 bool HistoryItem::canBeEdited() const {
+	if (isDeleted()) {
+		return false;
+	}
+
 	if ((!isRegular()
 			&& !isScheduled()
 			&& !isBusinessShortcut()
@@ -3464,6 +3496,10 @@ bool HistoryItem::allowsMediaDownloadControls() const {
 }
 
 bool HistoryItem::canDelete() const {
+	if (isDeleted()) {
+		return true;
+	}
+
 	if (isSponsored()) {
 		return false;
 	} else if (isEphemeral()) {
@@ -3500,6 +3536,10 @@ bool HistoryItem::canDelete() const {
 }
 
 bool HistoryItem::canDeleteForEveryone(TimeId now) const {
+	if (isDeleted()) {
+		return false;
+	}
+
 	const auto peer = _history->peer;
 	const auto &config = _history->session().serverConfig();
 	const auto messageToMyself = peer->isSelf();
@@ -3547,6 +3587,10 @@ bool HistoryItem::canBeSelected() const {
 }
 
 bool HistoryItem::suggestReport() const {
+	if (isDeleted()) {
+		return false;
+	}
+
 	if (out() || isService() || !isRegular() || IsAnchoredEphemeral(this)) {
 		return false;
 	} else if (_history->peer->isChannel()) {
@@ -3558,6 +3602,10 @@ bool HistoryItem::suggestReport() const {
 }
 
 bool HistoryItem::suggestBanReport() const {
+	if (isDeleted()) {
+		return false;
+	}
+
 	const auto channel = _history->peer->asChannel();
 	if (!channel || !channel->canRestrictParticipant(from())) {
 		return false;
@@ -3566,6 +3614,10 @@ bool HistoryItem::suggestBanReport() const {
 }
 
 bool HistoryItem::suggestDeleteAllReport() const {
+	if (isDeleted()) {
+		return false;
+	}
+
 	auto channel = _history->peer->asChannel();
 	if (!channel || !channel->canDeleteMessages()) {
 		return false;
@@ -3747,6 +3799,10 @@ void HistoryItem::translationDone(
 }
 
 bool HistoryItem::canReact() const {
+	if (isDeleted()) {
+		return false;
+	}
+
 	if (!isRegular()) {
 		return false;
 	} else if (isService()) {
@@ -4246,6 +4302,57 @@ void HistoryItem::setPostAuthor(const QString &postAuthor) {
 	history()->owner().requestItemResize(this);
 }
 
+void HistoryItem::setDeleted() {
+	_deleted = true;
+	_deletedAnimated = true;
+
+	// cleanup mentions and reactions as they tend to bug with deleted messages (e.g. can't remove mention)
+	if (isUnreadMention()) {
+		history()->unreadMentions().erase(id);
+		if (const auto topic = this->topic()) {
+			topic->unreadMentions().erase(id);
+		}
+	}
+	if (hasUnreadReaction()) {
+		history()->unreadReactions().erase(id);
+		if (const auto topic = this->topic()) {
+			topic->unreadReactions().erase(id);
+		} else if (const auto sublist = this->savedSublist()) {
+			sublist->unreadReactions().erase(id);
+		}
+	}
+
+	if (hasUnreadPollVote()) {
+		history()->unreadPollVotes().erase(id);
+		if (const auto topic = this->topic()) {
+			topic->unreadPollVotes().erase(id);
+		}
+	}
+
+	if (isService() && !_text.empty()) {
+		const auto data = Get<HistoryServiceData>();
+		setServiceText({
+			.text = TextWithEntities(_text).append(
+				u" ("_q).append(AyuMessages::DeletedMarkText()).append(u")"_q),
+			.links = data->textLinks,
+		});
+	}
+	history()->owner().requestItemViewRefresh(this);
+	history()->owner().requestItemResize(this);
+}
+
+bool HistoryItem::isDeleted() const {
+	return _deleted;
+}
+
+bool HistoryItem::wasDeletedAnimated() const {
+	return _deletedAnimated;
+}
+
+void HistoryItem::markDeletedAnimated() {
+	_deletedAnimated = false;
+}
+
 void HistoryItem::setReplies(HistoryMessageRepliesData &&data, bool notify) {
 	if (data.isNull) {
 		return;
@@ -4430,7 +4537,11 @@ void HistoryItem::applyTTL(TimeId destroyAt) {
 		const auto session = &_history->session();
 		crl::on_main(session, [session, id = fullId()]{
 			if (const auto item = session->data().message(id)) {
-				session->data().destroyMessageWithCacheCleanup(item);
+				if (AyuMessages::IsMessageSavable(item)) {
+					AyuMessages::ProcessMessageDelete(item);
+				} else {
+					session->data().destroyMessageWithCacheCleanup(item);
+				}
 			}
 		});
 	} else {
@@ -5394,6 +5505,7 @@ void HistoryItem::createComponentsHelper(HistoryItemCommonFields &&fields) {
 	const auto &replyTo = fields.replyTo;
 	auto config = CreateConfig();
 	config.viaBotId = fields.viaBotId;
+	config.editDate = fields.editDate;
 	config.scheduleRepeatPeriod = fields.scheduleRepeatPeriod;
 	if (fields.flags & MessageFlag::HasReplyInfo) {
 		config.reply.messageId = replyTo.messageId.msg;

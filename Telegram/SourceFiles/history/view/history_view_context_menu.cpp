@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_context_menu.h"
 
+#include "ayu/data/messages_storage.h"
+#include "ayu/deleted_messages.h"
+
 #include "api/api_attached_stickers.h"
 #include "api/api_editing.h"
 #include "api/api_global_privacy.h"
@@ -1389,6 +1392,23 @@ void AddTopMessageActions(
 		not_null<ListWidget*> list) {
 	if (request.item && IsAnchoredEphemeral(request.item)) {
 		return;
+	}
+	if (const auto item = request.item) {
+		if (item->Has<HistoryMessageEdited>()
+			|| AyuMessages::hasRevisions(item)) {
+			const auto controller = list->controller();
+			const auto peer = item->history()->peer;
+			const auto messageId = item->id;
+			menu->addAction(
+				tr::lng_xenon_edit_history(tr::now),
+				crl::guard(controller, [=] {
+					AyuMessages::ShowEditedMessages(
+						controller,
+						peer,
+						messageId);
+				}),
+				&st::menuIconEdit);
+		}
 	}
 	AddGoToMessageAction(menu, request, list);
 	AddViewRepliesAction(menu, request, list);

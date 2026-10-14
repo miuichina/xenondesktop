@@ -7,6 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
 
+#include "ayu/data/messages_storage.h"
+#include "ayu/deleted_messages.h"
+
+#include "ui/effects/spoiler_mess.h"
 #include "api/api_polls.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
@@ -1473,6 +1477,7 @@ void HistoryInner::paintBackdrop(Painter &p, QRect clip) {
 	if (hasPendingResizedItems() || clip.isEmpty()) {
 		return;
 	}
+	const auto spoilers = Ui::SpoilerAnimationSnapshot();
 	auto context = preparePaintContext(clip);
 	context.paused = true;
 	context.reactionInfo = nullptr;
@@ -3055,6 +3060,18 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			return;
 		}
 		const auto itemId = item->fullId();
+		const auto historyItem = albumPartItem ? albumPartItem : item;
+		if (historyItem->Has<HistoryMessageEdited>()
+			|| AyuMessages::hasRevisions(historyItem)) {
+			const auto peer = historyItem->history()->peer;
+			const auto messageId = historyItem->id;
+			_menu->addAction(
+				tr::lng_xenon_edit_history(tr::now),
+				crl::guard(controller, [=] {
+					AyuMessages::ShowEditedMessages(controller, peer, messageId);
+				}),
+				&st::menuIconEdit);
+		}
 		const auto repliesCount = item->repliesCount();
 		const auto withReplies = (repliesCount > 0);
 		const auto topicRootId = item->history()->isForum()

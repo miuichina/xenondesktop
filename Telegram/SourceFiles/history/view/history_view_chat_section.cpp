@@ -127,6 +127,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/editor/iv_editor_session.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
+#include "settings/sections/settings_xenon.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
@@ -2158,6 +2159,23 @@ bool ChatWidget::checkSendPayment(
 void ChatWidget::sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options) {
+	const auto confirmation = Settings::BundleSendConfirmation(*bundle);
+	if (confirmation
+		&& Settings::ConfirmSend(
+			controller(),
+			*confirmation,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendingFilesConfirmed(bundle, copy);
+			}))) {
+		return;
+	}
+
 	if (showSendingFilesError(*bundle)) {
 		return;
 	}
@@ -2292,7 +2310,19 @@ void ChatWidget::checkReplyReturns() {
 void ChatWidget::uploadFile(
 		const QByteArray &fileContent,
 		SendMediaType type) {
-	session().api().sendFile(fileContent, type, prepareSendAction({}));
+	const auto send = crl::guard(this, [=, history = _history] {
+		if (_history != history) {
+			return;
+		}
+		session().api().sendFile(fileContent, type, prepareSendAction({}));
+	});
+	if (!Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Media,
+			false,
+			send)) {
+		send();
+	}
 }
 
 bool ChatWidget::showSendingFilesError(
@@ -2380,6 +2410,23 @@ void ChatWidget::send() {
 }
 
 void ChatWidget::sendVoice(const ComposeControls::VoiceToSend &data) {
+	if (Settings::ConfirmSend(
+			controller(),
+			data.video
+				? Settings::SendConfirmation::Media
+				: Settings::SendConfirmation::Voice,
+			data.options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = data;
+				copy.options.sendConfirmed = true;
+				sendVoice(copy);
+			}))) {
+		return;
+	}
+
 	const auto withPaymentApproved = [=](int approved) {
 		auto copy = data;
 		copy.options.starsApproved = approved;
@@ -2477,6 +2524,22 @@ void ChatWidget::supportShareContact(Support::Contact contact) {
 void ChatWidget::sendRichDraft(
 		std::shared_ptr<const Iv::RichPage> page,
 		Api::SendOptions options) {
+	if (page != nullptr
+		&& Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendRichDraft(page, copy);
+			}))) {
+		return;
+	}
+
 	if (!page) {
 		return;
 	}
@@ -2595,6 +2658,26 @@ void ChatWidget::sendTextWithTags(
 		bool useCurrentWebPageDraft,
 		Api::SendOptions options,
 		Fn<void()> done) {
+	if (!textWithTags.text.trimmed().isEmpty()
+		&& Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendTextWithTags(
+					textWithTags,
+					useCurrentWebPageDraft,
+					copy,
+					done);
+			}))) {
+		return;
+	}
+
 	if (!options.scheduled) {
 		_cornerButtons.clearReplyReturns();
 	}
@@ -3170,6 +3253,21 @@ bool ChatWidget::sendExistingDocument(
 		not_null<DocumentData*> document,
 		Api::MessageToSend messageToSend,
 		std::optional<MsgId> localId) {
+	if (Settings::ConfirmSend(
+			controller(),
+			Settings::DocumentSendConfirmation(document),
+			messageToSend.action.options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = messageToSend;
+				copy.action.options.sendConfirmed = true;
+				sendExistingDocument(document, std::move(copy), localId);
+			}))) {
+		return false;
+	}
+
 	const auto ephemeralReply = session().ephemeralMessages()
 		.isEphemeralBotReply(messageToSend.action.replyTo.messageId);
 	const auto error = !ephemeralReply
@@ -3215,6 +3313,21 @@ void ChatWidget::sendExistingPhoto(not_null<PhotoData*> photo) {
 bool ChatWidget::sendExistingPhoto(
 		not_null<PhotoData*> photo,
 		Api::SendOptions options) {
+	if (Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Media,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendExistingPhoto(photo, copy);
+			}))) {
+		return false;
+	}
+
 	const auto ephemeralReply = session().ephemeralMessages()
 		.isEphemeralBotReply(replyTo().messageId);
 	const auto error = !ephemeralReply
@@ -3277,6 +3390,25 @@ void ChatWidget::sendInlineResult(
 		not_null<UserData*> bot,
 		Api::SendOptions options,
 		std::optional<MsgId> localMessageId) {
+	if (Settings::ConfirmSend(
+			controller(),
+			result->document()
+				? Settings::DocumentSendConfirmation(result->document())
+				: result->hasMedia()
+				? Settings::SendConfirmation::Media
+				: Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendInlineResult(result, bot, copy, localMessageId);
+			}))) {
+		return;
+	}
+
 	if (ShowEphemeralReplyTextOnlyError(
 			controller()->uiShow(),
 			&session(),
@@ -5489,6 +5621,21 @@ void ChatWidget::listSendBotCommand(
 void ChatWidget::sendBotCommand(
 		Bot::SendCommandRequest request,
 		Api::SendOptions options) {
+	if (Settings::ConfirmSend(
+			controller(),
+			Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, history = _history] {
+				if (_history != history) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendBotCommand(request, copy);
+			}))) {
+		return;
+	}
+
 	if (_peer != request.peer.get()) {
 		return;
 	}

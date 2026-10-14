@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "history/view/history_view_object.h"
+
+#include "ui/effects/animations.h"
 #include "base/runtime_composer.h"
 #include "base/flags.h"
 #include "base/weak_ptr.h"
@@ -457,6 +459,9 @@ public:
 		Element *replacing,
 		Flag serviceFlag);
 
+	[[nodiscard]] float64 deletedOpacity() const;
+	void startDeletedAnimation();
+	[[nodiscard]] Ui::Animations::Simple takeDeletedAnimation();
 	[[nodiscard]] virtual bool embedReactionsInBubble() const;
 
 	[[nodiscard]] not_null<ElementDelegate*> delegate() const;
@@ -825,6 +830,7 @@ private:
 	void recountAttachToPreviousInBlocks();
 
 	void refreshEphemeralBadge();
+	void refreshDeletedAnimationTarget();
 
 	[[nodiscard]] bool countIsTopicRootReply() const;
 
@@ -850,6 +856,8 @@ private:
 
 	const not_null<ElementDelegate*> _delegate;
 	const not_null<HistoryItem*> _data;
+	mutable Ui::Animations::Simple _deletedOpacityAnimation;
+	mutable std::shared_ptr<base::weak_ptr<Element>> _deletedOpacityAnimationTarget;
 	HistoryBlock *_block = nullptr;
 	std::unique_ptr<Media> _media;
 	mutable ClickHandlerPtr _fromLink;

@@ -54,6 +54,9 @@ public:
 	QString getId() const {
 		return _id;
 	}
+	[[nodiscard]] bool hasMedia() const {
+		return _document || _photo;
+	}
 	DocumentData *document() const {
 		return _document;
 	}

@@ -32,6 +32,7 @@ struct SendOptions {
 	QByteArray stakeSeedHash;
 	int64 stakeNanoTon = 0;
 	int starsApproved = 0;
+	bool sendConfirmed = false;
 	bool silent = false;
 	bool handleSupportSwitch = false;
 	bool invertCaption = false;

@@ -9197,3 +9197,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passcode_strength_advice_fine" = "This passcode is hard to guess.";
 
 // Keys finished
+
+"lng_xenon_save_deleted" = "Save deleted messages";
+"lng_xenon_save_deleted_bots" = "Save deleted messages in bot chats";
+"lng_xenon_transparent_deleted" = "Fade deleted messages";
+"lng_xenon_save_deleted_about" = "Keep received messages when they are deleted. Messages with text or captions are also saved locally and can be searched in View Deleted Messages in the chat menu. Media without text is only kept in the current chat until it is unloaded.";
+"lng_xenon_view_deleted" = "View Deleted Messages";
+"lng_xenon_clear_deleted" = "Clear Deleted Messages";
+"lng_xenon_clear_deleted_confirm" = "Permanently remove the locally saved deleted messages in this chat or topic?";
+
+"lng_xenon_deleted_mark" = "Deleted message mark";
+"lng_xenon_reset_mark" = "Reset";
+
+"lng_xenon_save_history" = "Save deleted and edited messages";
+"lng_xenon_save_history_bots" = "Save message history in bot chats";
+"lng_xenon_save_history_about" = "Keep deleted messages and previous text versions of edited incoming messages. View deleted messages from the chat menu, or choose Edit History from a message menu. Text and captions are saved locally; media without text is only kept until the chat is unloaded.";
+"lng_xenon_edit_history" = "Edit History";
+"lng_xenon_default_deleted_mark" = "Trash icon";

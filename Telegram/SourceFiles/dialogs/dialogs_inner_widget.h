@@ -589,6 +589,7 @@ private:
 	void refreshFilterResults();
 	void clearSearchResults(bool alsoPeerSearchResults = true);
 	void clearPeerSearchResults();
+	void hideSponsoredSearchResults();
 	void clearPreviewResults();
 	void updateSelectedRow(Key key = Key());
 	void trackResultsHistory(not_null<History*> history);

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
+#include "ayu/deleted_messages.h"
+
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
 #include "menu/menu_mark_as_read.h"
@@ -314,6 +316,7 @@ private:
 	void addToggleUnreadMark();
 	void addToggleArchive();
 	void addClearHistory();
+	void addDeletedMessages();
 	void addDeleteChat();
 	void addLeaveChat();
 	void addJoinChat();
@@ -857,6 +860,30 @@ void Filler::addToggleArchive() {
 		Data::HistoryUpdate::Flag::Folder
 	) | rpl::map(label);
 	SetActionText(archiveAction, std::move(actionText));
+}
+
+void Filler::addDeletedMessages() {
+	if (!_peer) {
+		return;
+	}
+	const auto peer = _peer;
+	const auto controller = _controller;
+	const auto topicId = _topic ? _topic->rootId().bare : ID(0);
+	_addAction({
+		.text = tr::lng_xenon_view_deleted(tr::now),
+		.handler = [=] {
+			AyuMessages::ShowDeletedMessages(controller, peer, topicId);
+		},
+		.icon = &st::menuIconArchive,
+	});
+	_addAction({
+		.text = tr::lng_xenon_clear_deleted(tr::now),
+		.handler = [=] {
+			AyuMessages::ClearDeletedMessages(controller->uiShow(), peer, topicId);
+		},
+		.icon = &st::menuIconDeleteAttention,
+		.isAttention = true,
+	});
 }
 
 void Filler::addClearHistory() {
@@ -1904,6 +1931,7 @@ void Filler::addVideoChat() {
 }
 
 void Filler::fillContextMenuActions() {
+	addDeletedMessages();
 	const auto history = _request.key.history();
 	const auto channel = history ? history->peer->asChannel() : nullptr;
 	if (channel && !channel->amIn() && !history->inChatList()) {
@@ -1935,6 +1963,7 @@ void Filler::fillContextMenuActions() {
 }
 
 void Filler::fillHistoryActions() {
+	addDeletedMessages();
 	addToggleMuteSubmenu(true);
 	addCreateTopic();
 	addInfo();
@@ -1958,6 +1987,7 @@ void Filler::fillHistoryActions() {
 }
 
 void Filler::fillProfileActions() {
+	addDeletedMessages();
 	addTTLSubmenu(true);
 	addSupportInfo();
 	addNewContact();
@@ -1988,6 +2018,7 @@ void Filler::fillProfileActions() {
 }
 
 void Filler::fillRepliesActions() {
+	addDeletedMessages();
 	if (_topic) {
 		addInfo();
 		addManageTopic();

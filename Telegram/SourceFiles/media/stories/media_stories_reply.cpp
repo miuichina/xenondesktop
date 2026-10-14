@@ -40,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "inline_bots/inline_bot_result.h"
 #include "lang/lang_keys.h"
+#include "settings/sections/settings_xenon.h"
 #include "main/session/send_as_peers.h"
 #include "main/main_session.h"
 #include "media/stories/media_stories_controller.h"
@@ -242,6 +243,22 @@ bool ReplyArea::sendReaction(const Data::ReactionId &id) {
 }
 
 void ReplyArea::send(Api::SendOptions options) {
+	if (!_controls->getTextWithAppliedMarkdown().text.trimmed().isEmpty()
+		&& ::Settings::ConfirmSend(
+			_controller->uiShow(),
+			::Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, reply = _data] {
+				if (_data != reply) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				send(copy);
+			}))) {
+		return;
+	}
+
 	auto text = _controls->getTextWithAppliedMarkdown();
 	const auto stars = _controls->chosenStarsForMessage();
 	if (const auto stream = _videoStream.get()) {
@@ -341,6 +358,23 @@ bool ReplyArea::checkSendPayment(
 }
 
 void ReplyArea::sendVoice(const VoiceToSend &data) {
+	if (::Settings::ConfirmSend(
+			_controller->uiShow(),
+			data.video
+				? ::Settings::SendConfirmation::Media
+				: ::Settings::SendConfirmation::Voice,
+			data.options.sendConfirmed,
+			crl::guard(this, [=, reply = _data] {
+				if (_data != reply) {
+					return;
+				}
+				auto copy = data;
+				copy.options.sendConfirmed = true;
+				sendVoice(copy);
+			}))) {
+		return;
+	}
+
 	auto action = prepareSendAction(data.options);
 
 	const auto withPaymentApproved = [=](int approved) {
@@ -371,6 +405,21 @@ bool ReplyArea::sendExistingDocument(
 		not_null<DocumentData*> document,
 		Api::MessageToSend messageToSend,
 		std::optional<MsgId> localId) {
+	if (::Settings::ConfirmSend(
+			_controller->uiShow(),
+			::Settings::DocumentSendConfirmation(document),
+			messageToSend.action.options.sendConfirmed,
+			crl::guard(this, [=, reply = _data] {
+				if (_data != reply) {
+					return;
+				}
+				auto copy = messageToSend;
+				copy.action.options.sendConfirmed = true;
+				sendExistingDocument(document, std::move(copy), localId);
+			}))) {
+		return false;
+	}
+
 	Expects(_data.peer != nullptr);
 
 	const auto show = _controller->uiShow();
@@ -412,6 +461,21 @@ void ReplyArea::sendExistingPhoto(not_null<PhotoData*> photo) {
 bool ReplyArea::sendExistingPhoto(
 		not_null<PhotoData*> photo,
 		Api::SendOptions options) {
+	if (::Settings::ConfirmSend(
+			_controller->uiShow(),
+			::Settings::SendConfirmation::Media,
+			options.sendConfirmed,
+			crl::guard(this, [=, reply = _data] {
+				if (_data != reply) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendExistingPhoto(photo, copy);
+			}))) {
+		return false;
+	}
+
 	Expects(_data.peer != nullptr);
 
 	const auto show = _controller->uiShow();
@@ -462,6 +526,25 @@ void ReplyArea::sendInlineResult(
 		not_null<UserData*> bot,
 		Api::SendOptions options,
 		std::optional<MsgId> localMessageId) {
+	if (::Settings::ConfirmSend(
+			_controller->uiShow(),
+			result->document()
+				? ::Settings::DocumentSendConfirmation(result->document())
+				: result->hasMedia()
+				? ::Settings::SendConfirmation::Media
+				: ::Settings::SendConfirmation::Messages,
+			options.sendConfirmed,
+			crl::guard(this, [=, reply = _data] {
+				if (_data != reply) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendInlineResult(result, bot, copy, localMessageId);
+			}))) {
+		return;
+	}
+
 	auto action = prepareSendAction(options);
 	action.generateLocal = true;
 
@@ -688,6 +771,23 @@ bool ReplyArea::confirmSendingFiles(
 void ReplyArea::sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options) {
+	const auto confirmation = ::Settings::BundleSendConfirmation(*bundle);
+	if (confirmation.has_value()
+		&& ::Settings::ConfirmSend(
+			_controller->uiShow(),
+			*confirmation,
+			options.sendConfirmed,
+			crl::guard(this, [=, reply = _data] {
+				if (_data != reply) {
+					return;
+				}
+				auto copy = options;
+				copy.sendConfirmed = true;
+				sendingFilesConfirmed(bundle, copy);
+			}))) {
+		return;
+	}
+
 	if (showSendingFilesError(*bundle)) {
 		return;
 	}

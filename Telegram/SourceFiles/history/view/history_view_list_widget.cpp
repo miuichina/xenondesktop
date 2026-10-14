@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_list_widget.h"
 
+#include "ui/effects/spoiler_mess.h"
 #include "history/view/history_view_about_view.h"
 #include "base/unixtime.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -3017,6 +3018,7 @@ void ListWidget::paintBackdrop(Painter &p, QRect clip) {
 	if (_resizePending || clip.isEmpty()) {
 		return;
 	}
+	const auto spoilers = Ui::SpoilerAnimationSnapshot();
 	auto context = preparePaintContext(clip);
 	context.paused = true;
 	context.reactionInfo = nullptr;

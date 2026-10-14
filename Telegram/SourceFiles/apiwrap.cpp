@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "apiwrap.h"
 
+#include "ayu/deleted_messages.h"
+
 #include "api/api_authorizations.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_blocked_peers.h"
@@ -1442,7 +1444,11 @@ void ApiWrap::markContentsRead(
 		QVector<MTPint>>();
 	markedIds.reserve(items.size());
 	for (const auto &item : items) {
-		if (!item->markContentsRead(true) || !item->isRegular()) {
+		const auto keepUnread = AyuMessages::SaveDeletedMessages()
+			&& item->isIncomingUnreadMedia()
+			&& item->media()->ttlSeconds();
+		if ((!keepUnread && !item->markContentsRead(true))
+			|| !item->isRegular()) {
 			continue;
 		}
 		if (const auto channel = item->history()->peer->asChannel()) {
@@ -1467,7 +1473,11 @@ void ApiWrap::markContentsRead(
 }
 
 void ApiWrap::markContentsRead(not_null<HistoryItem*> item) {
-	if (!item->markContentsRead(true) || !item->isRegular()) {
+	const auto keepUnread = AyuMessages::SaveDeletedMessages()
+		&& item->isIncomingUnreadMedia()
+		&& item->media()->ttlSeconds();
+	if ((!keepUnread && !item->markContentsRead(true))
+		|| !item->isRegular()) {
 		return;
 	}
 	const auto ids = MTP_vector<MTPint>(1, MTP_int(item->id));
@@ -4758,6 +4768,10 @@ void ApiWrap::sendRichMessage(
 void ApiWrap::sendMessage(
 		MessageToSend &&message,
 		std::optional<MsgId> localMessageId) {
+	AyuMessages::PrepareDeletedReply(
+		message.action.history,
+		message.textWithTags,
+		message.action.replyTo);
 	const auto history = message.action.history;
 	const auto peer = history->peer;
 	const auto &textWithTags = message.textWithTags;
