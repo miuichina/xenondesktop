@@ -274,6 +274,21 @@ const auto kMeta = BuildHelper({
 	}, acrylic ? acrylic->toggledValue() : rpl::producer<bool>(nullptr));
 	builder.addDivider();
 #endif
+	auto &smoothScroll = base::options::lookup<bool>("xenon-smooth-scroll");
+	const auto smooth = builder.addButton({
+		.id = u"xenon/smooth_scroll"_q,
+		.title = rpl::single(u"Smooth scroll"_q),
+		.toggled = rpl::single(smoothScroll.value()),
+		.keywords = { u"scroll"_q, u"smooth"_q, u"animation"_q },
+	});
+	if (smooth) {
+		smooth->toggledChanges() | rpl::on_next([
+			option = &smoothScroll
+		](bool checked) {
+			option->set(checked);
+		}, smooth->lifetime());
+	}
+	builder.addDivider();
 
 	auto &unreadOnTop = base::options::lookup<bool>(
 		Dialogs::kOptionDialogsUnreadOnTop);
