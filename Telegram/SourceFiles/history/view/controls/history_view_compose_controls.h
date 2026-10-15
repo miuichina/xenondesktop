@@ -388,6 +388,7 @@ private:
 	void updateSendLockBadge();
 	void updateMessagesTTLShown();
 	bool updateSendAsButton(std::shared_ptr<Data::GroupCall> videoStream);
+	[[nodiscard]] PeerData *sendingPeer() const;
 	void updateAttachBotsMenu();
 	void updateHeight();
 	void updateWrappingVisibility();

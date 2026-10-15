@@ -25,6 +25,7 @@ inline constexpr auto kScheduledUntilOnlineTimestamp = TimeId(0x7FFFFFFE);
 struct SendOptions {
 	uint64 price = 0;
 	PeerData *sendAs = nullptr;
+	UserId sendFromAccount = 0;
 	TimeId scheduled = 0;
 	TimeId scheduleRepeatPeriod = 0;
 	BusinessShortcutId shortcutId = 0;
@@ -39,6 +40,7 @@ struct SendOptions {
 	bool hideViaBot = false;
 	bool mediaSpoiler = false;
 	bool welcomeTemplate = false;
+	bool sendAccountCaptured = false;
 	crl::time ttlSeconds = 0;
 	SuggestOptions suggest;
 
@@ -81,6 +83,11 @@ struct MessageToSend {
 	TextWithTags textWithTags;
 	Data::WebPageDraft webPage;
 };
+
+[[nodiscard]] bool ResolveAccountSendAction(SendAction &action);
+[[nodiscard]] SendOptions CaptureSendAccount(
+	PeerData *peer,
+	SendOptions options);
 
 struct RemoteFileInfo {
 	MTPInputFile file;

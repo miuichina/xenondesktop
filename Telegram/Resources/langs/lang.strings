@@ -5096,6 +5096,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_send_gif_with_caption" = "Send GIF with caption";
 
 "lng_send_as_title" = "Send message as...";
+"lng_send_as_account_unavailable" = "This account cannot send here. Choose another sender.";
+"lng_send_as_inline_unavailable" = "Inline bot results are unavailable when sending from another account.";
 "lng_send_as_anonymous_admin" = "Anonymous admin";
 "lng_send_as_premium_required" = "Subscribe to {link} to be able to comment on behalf of your channels in group chats.";
 "lng_send_as_premium_required_link" = "Telegram Premium";

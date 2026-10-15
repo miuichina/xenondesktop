@@ -69,6 +69,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "boxes/premium_preview_box.h"
 #include "data/business/data_shortcut_messages.h"
+#include "data/data_document.h"
 #include "settings/business/settings_quick_replies.h"
 #include "ui/boxes/confirm_box.h"
 #include "chat_helpers/bot_keyboard.h"
@@ -88,6 +89,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "core/mime_type.h"
 #include "main/main_session.h"
+#include "main/session/send_as_peers.h"
 #include "main/main_session_settings.h"
 #include "media/player/media_player_instance.h"
 #include "menu/menu_timecode_action.h"
@@ -155,6 +157,20 @@ constexpr auto kPsaAboutPrefix = "cloud_lng_about_psa_";
 		not_null<PeerData*> peer,
 		Data::ForumTopic *topic,
 		SendPermission permission) {
+	const auto accountId = peer->session().sendAsPeers().chosenAccount(peer);
+	if (accountId) {
+		const auto target = peer->session().sendAsPeers().accountPeer(peer, accountId);
+		if (!target) {
+			return false;
+		}
+		if (topic) {
+			topic = target->forumTopicFor(topic->rootId());
+			if (!topic) {
+				return false;
+			}
+		}
+		peer = target;
+	}
 	switch (permission) {
 	case SendPermission::Anything:
 		return topic
@@ -938,6 +954,24 @@ ChatWidget::ChatWidget(
 	}, lifetime());
 
 	refreshCanSendMessages();
+	const auto selectedAccount = lifetime().make_state<UserId>(
+		session().sendAsPeers().chosenAccount(_peer));
+	session().sendAsPeers().updated() | rpl::filter([=](Main::SendAsKey key) {
+		return key == Main::SendAsKey(_peer);
+	}) | rpl::on_next([=] {
+		const auto accountId = session().sendAsPeers().chosenAccount(_peer);
+		const auto unavailable = accountId
+			&& !session().sendAsPeers().accountPeer(_peer, accountId);
+		if (*selectedAccount != accountId || unavailable) {
+			_sendPayment.clear();
+			if (*selectedAccount || unavailable) {
+				controller->hideLayer(anim::type::instant);
+			}
+			*selectedAccount = accountId;
+		}
+		refreshCanSendMessages();
+		updateControlsVisibility();
+	}, lifetime());
 
 	using PeerUpdateFlag = Data::PeerUpdate::Flag;
 	session().changes().peerUpdates(
@@ -1457,9 +1491,35 @@ Data::ForumTopic *ChatWidget::resolvedTopic() {
 	return forum->enforceTopicFor(rootId);
 }
 
+PeerData *ChatWidget::sendingPeer() const {
+	if (_composeControls->isEditingMessage()) {
+		return _peer;
+	}
+	const auto accountId = session().sendAsPeers().chosenAccount(_peer);
+	const auto peer = session().sendAsPeers().accountPeer(_peer, accountId);
+	return peer ? peer : _peer.get();
+}
+
 void ChatWidget::refreshCanSendMessages() {
 	_canSendMessagesLifetime.destroy();
-	const auto apply = [=](bool can) {
+	const auto peer = sendingPeer();
+	const auto accountId = session().sendAsPeers().chosenAccount(_peer);
+	const auto unavailable = accountId
+		&& !session().sendAsPeers().accountPeer(_peer, accountId);
+	if (peer != _peer && resolvedTopicRootId()
+		&& !peer->forumTopicFor(resolvedTopicRootId())) {
+		if (const auto forum = peer->forum()) {
+			forum->requestTopic(resolvedTopicRootId(), crl::guard(this, [=] {
+				if (sendingPeer()->forumTopicFor(resolvedTopicRootId())) {
+					refreshCanSendMessages();
+				}
+				_kbReplyToChanges.fire({});
+				updateControlsVisibility();
+			}));
+		}
+	}
+	const auto apply = [=](bool allowed) {
+		const auto can = allowed && !unavailable;
 		const auto changed = (_canSendMessages != can);
 		_canSendMessages = can;
 		_bottom->setCanSendMessages(can);
@@ -1467,13 +1527,13 @@ void ChatWidget::refreshCanSendMessages() {
 			updateControlsVisibility();
 		}
 	};
-	if (const auto topic = resolvedTopic()) {
+	if (const auto topic = peer->forumTopicFor(resolvedTopicRootId())) {
 		Data::CanSendAnythingValue(
 			topic
 		) | rpl::on_next(std::move(apply), _canSendMessagesLifetime);
 	} else {
 		Data::CanSendAnythingValue(
-			_peer
+			peer
 		) | rpl::on_next(std::move(apply), _canSendMessagesLifetime);
 	}
 }
@@ -1504,6 +1564,9 @@ bool ChatWidget::computeAreComments() const {
 
 void ChatWidget::setupComposeControls() {
 	auto replyThreadChanges = rpl::merge(
+		session().sendAsPeers().updated() | rpl::filter([=](Main::SendAsKey key) {
+			return key == Main::SendAsKey(_peer);
+		}) | rpl::to_empty,
 		_composeControls->replyingToMessageValue() | rpl::to_empty,
 		_kbReplyToChanges.events() | rpl::to_empty);
 	auto topicClosedChanges = rpl::single(
@@ -1521,10 +1584,10 @@ void ChatWidget::setupComposeControls() {
 		rpl::duplicate(replyThreadChanges),
 		rpl::duplicate(topicClosedChanges)
 	) | rpl::map([=](auto, auto, auto, auto) {
-		const auto topic = resolvedTopic();
+		const auto topic = sendingPeer()->forumTopicFor(resolvedTopicRootId());
 		return topic
 			? Data::CanSend(topic, ChatRestriction::SendOther)
-			: Data::CanSend(_peer, ChatRestriction::SendOther);
+			: Data::CanSend(sendingPeer(), ChatRestriction::SendOther);
 	});
 	auto writeRestriction = rpl::combine(
 		session().frozenValue(),
@@ -1540,6 +1603,13 @@ void ChatWidget::setupComposeControls() {
 			auto,
 			auto,
 			auto) {
+		const auto accountId = session().sendAsPeers().chosenAccount(_peer);
+		if (accountId && !session().sendAsPeers().accountPeer(_peer, accountId)) {
+			return Controls::WriteRestriction{
+				.text = tr::lng_send_as_account_unavailable(tr::now),
+				.type = Controls::WriteRestrictionType::Rights,
+			};
+		}
 		if (_bottom->isButtonActive()) {
 			return Controls::WriteRestriction();
 		}
@@ -1550,10 +1620,16 @@ void ChatWidget::setupComposeControls() {
 		}
 		const auto allWithoutPolls = Data::AllSendRestrictions()
 			& ~ChatRestriction::SendPolls;
-		const auto topic = resolvedTopic();
+		const auto topic = sendingPeer()->forumTopicFor(resolvedTopicRootId());
+		if (sendingPeer() != _peer && resolvedTopic() && !topic) {
+			return Controls::WriteRestriction{
+				.text = tr::lng_contacts_loading(tr::now),
+				.type = Controls::WriteRestrictionType::Rights,
+			};
+		}
 		const auto canSendAnything = topic
 			? Data::CanSendAnyOf(topic, allWithoutPolls)
-			: Data::CanSendAnyOf(_peer, allWithoutPolls);
+			: Data::CanSendAnyOf(sendingPeer(), allWithoutPolls);
 		const auto channel = _peer->asChannel();
 		if ((mode() == Mode::History)
 			&& !canSendAnything
@@ -1572,7 +1648,7 @@ void ChatWidget::setupComposeControls() {
 			? Data::SendError()
 			: tr::lng_forum_topic_closed(tr::now);
 		const auto restriction = Data::RestrictionError(
-			_peer,
+			sendingPeer(),
 			ChatRestriction::SendOther);
 		auto text = !canSendAnything
 			? (restriction
@@ -2023,7 +2099,7 @@ void ChatWidget::chooseAttach(
 				uploadFile(result.remoteContent, SendMediaType::File);
 			}
 		} else {
-			const auto premium = controller()->session().user()->isPremium();
+			const auto premium = sendingPeer()->session().premium();
 			auto list = Storage::PrepareMediaList(
 				result.paths,
 				st::sendMediaPreviewSize,
@@ -2042,7 +2118,7 @@ bool ChatWidget::confirmSendingFiles(
 		_composeSearch->hideAnimated();
 	}
 	const auto hasImage = data->hasImage();
-	const auto premium = controller()->session().user()->isPremium();
+	const auto premium = sendingPeer()->session().premium();
 
 	if (const auto urls = Core::ReadMimeUrls(data); !urls.empty()) {
 		const auto folder = Storage::SingleFolderPath(urls);
@@ -2107,6 +2183,7 @@ bool ChatWidget::confirmSendingFiles(
 		return false;
 	}
 
+	const auto senderOptions = Api::CaptureSendAccount(_peer, {});
 	auto box = Box<SendFilesBox>(
 		controller(),
 		std::move(list),
@@ -2125,6 +2202,8 @@ bool ChatWidget::confirmSendingFiles(
 				&& _composeControls->replyingToMessage().messageId) {
 			_composeControls->cancelReplyMessage();
 		}
+		options.sendFromAccount = senderOptions.sendFromAccount;
+		options.sendAccountCaptured = true;
 		sendingFilesConfirmed(std::move(bundle), options);
 	}));
 	box->setStashCallbacks(
@@ -2148,17 +2227,25 @@ bool ChatWidget::checkSendPayment(
 		int messagesCount,
 		Api::SendOptions options,
 		Fn<void(int)> withPaymentApproved) {
+	options = Api::CaptureSendAccount(_peer, options);
+	const auto peer = options.sendFromAccount
+		? session().sendAsPeers().accountPeer(_peer, options.sendFromAccount)
+		: _peer.get();
+	if (!peer) {
+		controller()->showToast(tr::lng_send_as_account_unavailable(tr::now));
+		return false;
+	}
 	return _sendPayment.check(
-		controller(),
-		_peer,
+		Main::MakeSessionShow(controller()->uiShow(), &peer->session()),
+		peer,
 		options,
 		messagesCount,
 		std::move(withPaymentApproved));
 }
-
 void ChatWidget::sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options) {
+	options = Api::CaptureSendAccount(_peer, options);
 	const auto confirmation = Settings::BundleSendConfirmation(*bundle);
 	if (confirmation
 		&& Settings::ConfirmSend(
@@ -2240,12 +2327,12 @@ bool ChatWidget::confirmSendingFiles(
 
 bool ChatWidget::showSlowmodeError() {
 	const auto text = [&] {
-		if (const auto left = _peer->slowmodeSecondsLeft()) {
+		if (const auto left = sendingPeer()->slowmodeSecondsLeft()) {
 			return tr::lng_slowmode_enabled(
 				tr::now,
 				lt_left,
 				Ui::FormatDurationWordsSlowmode(left));
-		} else if (_peer->slowmodeApplied()) {
+		} else if (sendingPeer()->slowmodeApplied()) {
 			if (const auto item = _history->latestSendingMessage()) {
 				showAtPosition(item->position());
 				return tr::lng_slowmode_no_many(tr::now);
@@ -2275,7 +2362,7 @@ bool ChatWidget::showScheduleSendError() {
 		.richMessage = richMessage,
 	};
 	request.messagesCount = ComputeSendingMessagesCount(_history, request);
-	const auto error = GetErrorForSending(_peer, request);
+	const auto error = GetErrorForSending(sendingPeer(), request);
 	if (error) {
 		Data::ShowSendErrorToast(controller(), _peer, error);
 		return true;
@@ -2332,7 +2419,7 @@ bool ChatWidget::showSendingFilesError(
 		.isEphemeralBotReply(replyTo().messageId);
 	return Data::ShowSendError(
 		show,
-		_peer,
+		sendingPeer(),
 		list,
 		std::nullopt,
 		false,
@@ -2345,7 +2432,7 @@ bool ChatWidget::showSendingFilesError(
 		.isEphemeralBotReply(replyTo().messageId);
 	return Data::ShowSendError(
 		controller()->uiShow(),
-		_peer,
+		sendingPeer(),
 		bundle,
 		false,
 		ephemeralReply);
@@ -2390,6 +2477,7 @@ Api::SendAction ChatWidget::prepareSendAction(
 	}
 
 	result.options.sendAs = _composeControls->sendAsPeer();
+	result.options = Api::CaptureSendAccount(_peer, result.options);
 	result.options.suggest = suggestOptions();
 	result.clearDraft = !Iv::Editor::IsComposeBoxOpen(
 		&session(),
@@ -2410,17 +2498,19 @@ void ChatWidget::send() {
 }
 
 void ChatWidget::sendVoice(const ComposeControls::VoiceToSend &data) {
+	const auto options = Api::CaptureSendAccount(_peer, data.options);
 	if (Settings::ConfirmSend(
 			controller(),
 			data.video
 				? Settings::SendConfirmation::Media
 				: Settings::SendConfirmation::Voice,
-			data.options.sendConfirmed,
+			options.sendConfirmed,
 			crl::guard(this, [=, history = _history] {
 				if (_history != history) {
 					return;
 				}
 				auto copy = data;
+				copy.options = options;
 				copy.options.sendConfirmed = true;
 				sendVoice(copy);
 			}))) {
@@ -2429,10 +2519,16 @@ void ChatWidget::sendVoice(const ComposeControls::VoiceToSend &data) {
 
 	const auto withPaymentApproved = [=](int approved) {
 		auto copy = data;
+		copy.options = options;
 		copy.options.starsApproved = approved;
 		sendVoice(copy);
 	};
-	auto action = prepareSendAction(data.options);
+	auto action = prepareSendAction(options);
+	auto checkedAction = action;
+	if (!Api::ResolveAccountSendAction(checkedAction)) {
+		controller()->showToast(tr::lng_send_as_account_unavailable(tr::now));
+		return;
+	}
 	const auto checked = checkSendPayment(
 		1 + int(_composeControls->forwardItems().size()),
 		action.options,
@@ -2497,9 +2593,7 @@ void ChatWidget::supportShareContact(Support::Contact contact) {
 	contact.comment = _composeControls->fieldLastText();
 
 	const auto submit = [=](Qt::KeyboardModifiers modifiers) {
-		auto options = Api::SendOptions{
-			.sendAs = prepareSendAction({}).options.sendAs,
-		};
+		auto options = prepareSendAction({}).options;
 		auto action = Api::SendAction(_history);
 		send(options);
 		options.handleSupportSwitch = Support::HandleSwitch(modifiers);
@@ -2524,6 +2618,7 @@ void ChatWidget::supportShareContact(Support::Contact contact) {
 void ChatWidget::sendRichDraft(
 		std::shared_ptr<const Iv::RichPage> page,
 		Api::SendOptions options) {
+	options = Api::CaptureSendAccount(_peer, options);
 	if (page != nullptr
 		&& Settings::ConfirmSend(
 			controller(),
@@ -2565,7 +2660,7 @@ void ChatWidget::sendRichDraft(
 		.ignoreRestrictions = ephemeral,
 	};
 	request.messagesCount = ComputeSendingMessagesCount(_history, request);
-	const auto error = GetErrorForSending(_peer, request);
+	const auto error = GetErrorForSending(sendingPeer(), request);
 	if (error) {
 		Data::ShowSendErrorToast(controller(), _peer, error);
 		return;
@@ -2658,6 +2753,7 @@ void ChatWidget::sendTextWithTags(
 		bool useCurrentWebPageDraft,
 		Api::SendOptions options,
 		Fn<void()> done) {
+	options = Api::CaptureSendAccount(_peer, options);
 	if (!textWithTags.text.trimmed().isEmpty()
 		&& Settings::ConfirmSend(
 			controller(),
@@ -2683,6 +2779,11 @@ void ChatWidget::sendTextWithTags(
 	}
 
 	auto message = Api::MessageToSend(prepareSendAction(options));
+	auto checkedAction = message.action;
+	if (!Api::ResolveAccountSendAction(checkedAction)) {
+		controller()->showToast(tr::lng_send_as_account_unavailable(tr::now));
+		return;
+	}
 	message.textWithTags = textWithTags;
 	if (useCurrentWebPageDraft) {
 		message.webPage = _composeControls->webPageDraft();
@@ -2703,7 +2804,7 @@ void ChatWidget::sendTextWithTags(
 	};
 	request.messagesCount = ComputeSendingMessagesCount(_history, request);
 	if (_canSendMessages) {
-		const auto error = GetErrorForSending(_peer, request);
+		const auto error = GetErrorForSending(sendingPeer(), request);
 		if (error) {
 			Data::ShowSendErrorToast(controller(), _peer, error);
 			return;
@@ -3253,6 +3354,13 @@ bool ChatWidget::sendExistingDocument(
 		not_null<DocumentData*> document,
 		Api::MessageToSend messageToSend,
 		std::optional<MsgId> localId) {
+	if (messageToSend.action.options.sendFromAccount) {
+		auto checkedAction = messageToSend.action;
+		if (!Api::ResolveAccountSendAction(checkedAction)) {
+			controller()->showToast(tr::lng_send_as_account_unavailable(tr::now));
+			return false;
+		}
+	}
 	if (Settings::ConfirmSend(
 			controller(),
 			Settings::DocumentSendConfirmation(document),
@@ -3271,13 +3379,14 @@ bool ChatWidget::sendExistingDocument(
 	const auto ephemeralReply = session().ephemeralMessages()
 		.isEphemeralBotReply(messageToSend.action.replyTo.messageId);
 	const auto error = !ephemeralReply
-		? Data::RestrictionError(_peer, ChatRestriction::SendStickers)
+		? Data::RestrictionError(sendingPeer(), document->requiredSendRight())
 		: Data::SendError();
 	if (error) {
 		Data::ShowSendErrorToast(controller(), _peer, error);
 		return false;
 	} else if ((!ephemeralReply && showSlowmodeError())
-		|| ShowSendPremiumError(controller(), document)) {
+		|| (!messageToSend.action.options.sendFromAccount
+			&& ShowSendPremiumError(controller(), document))) {
 		return false;
 	}
 	if (!ephemeralReply) {
@@ -3313,6 +3422,7 @@ void ChatWidget::sendExistingPhoto(not_null<PhotoData*> photo) {
 bool ChatWidget::sendExistingPhoto(
 		not_null<PhotoData*> photo,
 		Api::SendOptions options) {
+	options = Api::CaptureSendAccount(_peer, options);
 	if (Settings::ConfirmSend(
 			controller(),
 			Settings::SendConfirmation::Media,
@@ -3331,7 +3441,7 @@ bool ChatWidget::sendExistingPhoto(
 	const auto ephemeralReply = session().ephemeralMessages()
 		.isEphemeralBotReply(replyTo().messageId);
 	const auto error = !ephemeralReply
-		? Data::RestrictionError(_peer, ChatRestriction::SendPhotos)
+		? Data::RestrictionError(sendingPeer(), ChatRestriction::SendPhotos)
 		: Data::SendError();
 	if (error) {
 		Data::ShowSendErrorToast(controller(), _peer, error);
@@ -3368,6 +3478,10 @@ bool ChatWidget::sendExistingPhoto(
 void ChatWidget::sendInlineResult(
 		std::shared_ptr<InlineBots::Result> result,
 		not_null<UserData*> bot) {
+	if (session().sendAsPeers().chosenAccount(_peer)) {
+		sendInlineResult(std::move(result), bot, {}, std::nullopt);
+		return;
+	}
 	if (!_canSendMessages) {
 		return;
 	} else if (showSlowmodeError()) {
@@ -3390,6 +3504,12 @@ void ChatWidget::sendInlineResult(
 		not_null<UserData*> bot,
 		Api::SendOptions options,
 		std::optional<MsgId> localMessageId) {
+	options = Api::CaptureSendAccount(_peer, options);
+	const auto document = result->document();
+	if (options.sendFromAccount && (!document || !document->isAnimation())) {
+		controller()->showToast(tr::lng_send_as_inline_unavailable(tr::now));
+		return;
+	}
 	if (Settings::ConfirmSend(
 			controller(),
 			result->document()
@@ -3406,6 +3526,17 @@ void ChatWidget::sendInlineResult(
 				copy.sendConfirmed = true;
 				sendInlineResult(result, bot, copy, localMessageId);
 			}))) {
+		return;
+	}
+
+	if (options.sendFromAccount) {
+		if (sendExistingDocument(
+				document,
+				Api::MessageToSend(prepareSendAction(options)),
+				std::nullopt)) {
+			_composeControls->clear();
+			finishSending();
+		}
 		return;
 	}
 
@@ -4238,7 +4369,7 @@ bool ChatWidget::confirmSendingFiles(not_null<const QMimeData*> data) {
 bool ChatWidget::confirmSendingFiles(
 		const QStringList &files,
 		const QString &insertTextOnCancel) {
-	const auto premium = controller()->session().user()->isPremium();
+	const auto premium = sendingPeer()->session().premium();
 	return confirmSendingFiles(
 		Storage::PrepareMediaList(files, st::sendMediaPreviewSize, premium),
 		insertTextOnCancel);

@@ -67,6 +67,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "main/session/send_as_peers.h"
 #include "main/main_session_settings.h"
 #include "menu/menu_mute.h"
 #include "menu/menu_ttl_validator.h"
@@ -2452,6 +2453,7 @@ void PeerMenuCreatePoll(
 		PollData::Flags disabled,
 		Api::SendType sendType,
 		SendMenu::Details sendMenuDetails) {
+	const auto sender = Api::CaptureSendAccount(peer, {});
 	if (ShowEphemeralReplyTextOnlyError(
 			controller->uiShow(),
 			&peer->session(),
@@ -2492,6 +2494,13 @@ void PeerMenuCreatePoll(
 			result.options);
 		action.replyTo = replyTo;
 		action.options.suggest = suggest;
+		action.options.sendFromAccount = sender.sendFromAccount;
+		action.options.sendAccountCaptured = true;
+		auto checkedAction = action;
+		if (!Api::ResolveAccountSendAction(checkedAction)) {
+			controller->showToast(tr::lng_send_as_account_unavailable(tr::now));
+			return;
+		}
 		if (ShowEphemeralReplyTextOnlyError(
 				controller->uiShow(),
 				&peer->session(),
@@ -2507,8 +2516,10 @@ void PeerMenuCreatePoll(
 			}
 		});
 		const auto checked = state->sendPayment.check(
-			controller,
-			peer,
+			Main::MakeSessionShow(
+				controller->uiShow(),
+				&checkedAction.history->session()),
+			checkedAction.history->peer,
 			action.options,
 			1,
 			withPaymentApproved);
@@ -2594,6 +2605,7 @@ void PeerMenuCreateTodoList(
 		SuggestOptions suggest,
 		Api::SendType sendType,
 		SendMenu::Details sendMenuDetails) {
+	const auto sender = Api::CaptureSendAccount(peer, {});
 	if (ShowEphemeralReplyTextOnlyError(
 			controller->uiShow(),
 			&peer->session(),
@@ -2636,6 +2648,13 @@ void PeerMenuCreateTodoList(
 			result.options);
 		action.replyTo = replyTo;
 		action.options.suggest = suggest;
+		action.options.sendFromAccount = sender.sendFromAccount;
+		action.options.sendAccountCaptured = true;
+		auto checkedAction = action;
+		if (!Api::ResolveAccountSendAction(checkedAction)) {
+			controller->showToast(tr::lng_send_as_account_unavailable(tr::now));
+			return;
+		}
 		if (ShowEphemeralReplyTextOnlyError(
 				controller->uiShow(),
 				&peer->session(),
@@ -2644,8 +2663,10 @@ void PeerMenuCreateTodoList(
 		}
 
 		const auto checked = state->sendPayment.check(
-			controller,
-			peer,
+			Main::MakeSessionShow(
+				controller->uiShow(),
+				&checkedAction.history->session()),
+			checkedAction.history->peer,
 			action.options,
 			1,
 			withPaymentApproved);

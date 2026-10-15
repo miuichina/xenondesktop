@@ -8,19 +8,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/choose_send_as.h"
 
 #include "boxes/peer_list_box.h"
+#include "data/data_channel.h"
 #include "data/data_group_call.h"
 #include "data/data_peer.h"
-#include "data/data_channel.h"
 #include "data/data_peer_values.h"
+#include "data/data_user.h"
 #include "history/history.h"
+#include "lang/lang_keys.h"
+#include "main/session/send_as_peers.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
+#include "main/main_session.h"
+#include "settings/sections/settings_premium.h"
 #include "ui/controls/send_as_button.h"
 #include "ui/text/text_utilities.h"
 #include "ui/painter.h"
 #include "window/window_session_controller.h"
-#include "main/main_session.h"
-#include "main/session/send_as_peers.h"
-#include "lang/lang_keys.h"
-#include "settings/sections/settings_premium.h"
 #include "styles/style_calls.h"
 #include "styles/style_chat_helpers.h"
 
@@ -30,6 +33,8 @@ namespace {
 class Row final : public PeerListRow {
 public:
 	explicit Row(const Main::SendAsPeer &sendAsPeer);
+	PaintRoundImageCallback generatePaintUserpicCallback(
+		bool forceRound) override;
 
 	int paintNameIconGetWidth(
 		Painter &p,
@@ -43,6 +48,7 @@ public:
 		bool selected) override;
 
 private:
+	UserId _accountId = 0;
 	bool _premiumRequired = false;
 
 };
@@ -70,7 +76,34 @@ private:
 
 Row::Row(const Main::SendAsPeer &sendAsPeer)
 : PeerListRow(sendAsPeer.peer)
+, _accountId(sendAsPeer.accountId)
 , _premiumRequired(sendAsPeer.premiumRequired) {
+}
+
+PaintRoundImageCallback Row::generatePaintUserpicCallback(bool forceRound) {
+	if (!_accountId) {
+		return PeerListRow::generatePaintUserpicCallback(forceRound);
+	}
+	const auto display = peer();
+	const auto id = _accountId;
+	return [=, view = Ui::PeerUserpicView()](
+			Painter &p,
+			int x,
+			int y,
+			int outerWidth,
+			int size) mutable {
+		auto user = display.get();
+		for (const auto &entry : display->session().domain().accounts()) {
+			const auto session = entry.account->maybeSession();
+			if (session && session->userId() == id
+				&& session->mtp().environment()
+					== display->session().mtp().environment()) {
+				user = session->user();
+				break;
+			}
+		}
+		user->paintUserpicLeft(p, view, x, y, outerWidth, size);
+	};
 }
 
 int Row::paintNameIconGetWidth(
@@ -127,6 +160,9 @@ std::unique_ptr<Row> ListController::createRow(
 		const Main::SendAsPeer &sendAsPeer) {
 	auto result = std::make_unique<Row>(sendAsPeer);
 	if (sendAsPeer.peer->isSelf()) {
+		result->setCustomStatus(
+			tr::lng_group_call_join_as_personal(tr::now));
+	} else if (sendAsPeer.accountId) {
 		result->setCustomStatus(
 			tr::lng_group_call_join_as_personal(tr::now));
 	} else if (sendAsPeer.peer->isMegagroup()) {
@@ -223,13 +259,24 @@ void SetupSendAsButton(
 		if (!peer) {
 			return;
 		}
-		const auto key = Main::SendAsKey{ peer, Main::SendAsType::Message };
 		const auto session = &peer->session();
-		const auto &list = session->sendAsPeers().list(key);
+		const auto list = session->sendAsPeers().choices(peer);
 		if (list.size() < 2) {
 			return;
 		}
 		const auto done = [=](not_null<PeerData*> sendAs) {
+			const auto current = session->sendAsPeers().choices(peer);
+			const auto account = ranges::find(
+				current,
+				sendAs,
+				&Main::SendAsPeer::peer);
+			if (account == end(current)
+				|| (account->accountId && !session->sendAsPeers().accountPeer(
+					peer,
+					account->accountId))) {
+				show->showToast(tr::lng_send_as_account_unavailable(tr::now));
+				return false;
+			}
 			const auto i = ranges::find(
 				list,
 				sendAs,
@@ -257,29 +304,31 @@ void SetupSendAsButton(
 			Ui::ChooseSendAsBox,
 			st,
 			list,
-			session->sendAsPeers().resolveChosen(peer),
+			session->sendAsPeers().displayChosen(peer),
 			done));
 	});
 
 	const auto size = st.button.size;
 	auto userpic = current->value(
 	) | rpl::filter([=](PeerData *peer) {
-		return peer && peer->isChannel();
+		return peer && !peer->isUser();
 	}) | rpl::map([=](not_null<PeerData*> peer) {
-		const auto channel = peer->asChannel();
 
 		auto updates = rpl::single(
 			rpl::empty
-		) | rpl::then(channel->session().sendAsPeers().updated(
+		) | rpl::then(peer->session().sendAsPeers().updated(
 		) | rpl::filter(
-			_1 == Main::SendAsKey(channel, Main::SendAsType::Message)
+			_1 == Main::SendAsKey(peer, Main::SendAsType::Message)
 		) | rpl::to_empty);
 
-		return rpl::combine(
-			std::move(updates),
-			channel->adminRightsValue()
-		) | rpl::map([=] {
-			return channel->session().sendAsPeers().resolveChosen(channel);
+		return std::move(updates) | rpl::map([=] {
+			const auto accountId = peer->session().sendAsPeers().chosenAccount(peer);
+			if (const auto target = peer->session().sendAsPeers().accountPeer(
+					peer,
+					accountId)) {
+				return not_null<PeerData*>(target->session().user());
+			}
+			return peer->session().sendAsPeers().displayChosen(peer);
 		}) | rpl::distinct_until_changed(
 		) | rpl::map([=](not_null<PeerData*> chosen) {
 			return Data::PeerUserpicImageValue(

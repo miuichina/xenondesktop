@@ -374,6 +374,7 @@ private:
 
 	[[nodiscard]] Api::SendAction prepareSendAction(
 		Api::SendOptions options) const;
+	[[nodiscard]] PeerData *sendingPeer() const;
 	void sendTextWithTags(
 		TextWithTags textWithTags,
 		bool useCurrentWebPageDraft,

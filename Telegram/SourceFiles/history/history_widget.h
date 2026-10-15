@@ -800,6 +800,7 @@ private:
 		HistoryView::SuggestMode mode);
 	void setupSendAsToggle();
 	void refreshSendAsToggle();
+	[[nodiscard]] PeerData *sendingPeer() const;
 	void refreshAttachBotsMenu();
 
 	void injectSponsoredMessages() const;
@@ -953,6 +954,7 @@ private:
 	QPointer<Ui::IconButton> _giftToChannel;
 	QPointer<Ui::IconButton> _directMessage;
 	rpl::lifetime _directMessageLifetime;
+	rpl::lifetime _senderSlowmodeLifetime;
 	object_ptr<Ui::FlatButton> _reportMessages;
 	std::unique_ptr<HistoryView::BotMenuButton> _botMenu;
 	PeerId _botMenuPeer = 0;

@@ -762,6 +762,7 @@ Api::SendAction ScheduledWidget::prepareSendAction(
 		Api::SendOptions options) const {
 	auto result = Api::SendAction(_history, options);
 	result.options.sendAs = _composeControls->sendAsPeer();
+	result.options = Api::CaptureSendAccount(_history->peer, result.options);
 	if (_forumTopic) {
 		result.replyTo.topicRootId = _forumTopic->topicRootId();
 		result.replyTo.messageId = FullMsgId(

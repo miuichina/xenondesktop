@@ -1676,6 +1676,7 @@ void ComposeControls::updateControlsParents() {
 	toggle(_like, restriction.type == Type::PremiumRequired);
 	toggle(_commentsShown, restriction.type != Type::None);
 	toggle(_starsReaction, restriction.type != Type::None);
+	toggle(_sendAs, restriction.type != Type::None);
 }
 
 void ComposeControls::updateFeatures(ChatHelpers::ComposeFeatures features) {
@@ -4214,6 +4215,21 @@ void ComposeControls::initSendAsButton(
 		peer,
 		videoStream ? SendAsType::VideoStream : SendAsType::Message,
 	};
+	if (!videoStream && _mode == Mode::Normal && !peer->isUser()) {
+		auto sender = rpl::single(key) | rpl::then(
+			session().sendAsPeers().updated() | rpl::filter(_1 == key)
+		) | rpl::map([=] {
+			return not_null<PeerData*>(sendingPeer());
+		}) | rpl::distinct_until_changed();
+		_slowmodeSecondsLeft = rpl::duplicate(sender) | rpl::map([](
+				not_null<PeerData*> peer) {
+			return SlowmodeSecondsLeft(peer);
+		}) | rpl::flatten_latest();
+		_sendDisabledBySlowmode = std::move(sender) | rpl::map([](
+				not_null<PeerData*> peer) {
+			return SendDisabledBySlowmode(peer);
+		}) | rpl::flatten_latest();
+	}
 	rpl::combine(
 		rpl::single(key) | rpl::then(
 			session().sendAsPeers().updated() | rpl::filter(_1 == key)
@@ -4222,11 +4238,13 @@ void ComposeControls::initSendAsButton(
 			? rpl::single(true)
 			: Data::CanSendAnythingValue(key.peer, false))
 	) | rpl::skip(1) | rpl::on_next([=] {
-		if (updateSendAsButton(videoStream)) {
-			updateControlsVisibility();
-			updateControlsGeometry(_wrap->size());
-			orderControls();
-		}
+		updateSendAsButton(videoStream);
+		updateAttachBotsMenu();
+		_selector->setCurrentPeer(_history->peer);
+		updateControlsVisibility();
+		updateWrappingVisibility();
+		updateControlsGeometry(_wrap->size());
+		orderControls();
 	}, _historyLifetime);
 
 	updateSendAsButton(videoStream);
@@ -4328,8 +4346,12 @@ void SetupRestrictionView(
 				QSize(left + state->unlock->width(), widget->height())));
 			state->icon->moveToLeft(0, 0, widget->width());
 		} else {
-			const auto left = st::historySendRight;
-			state->label->resizeToWidth(widget->width() - 2 * left);
+			const auto senderSkip = peer->session().sendAsPeers().shouldChoose({ peer })
+				? st->chooseSendAs.button.size
+				: 0;
+			const auto left = st::historySendRight + senderSkip;
+			state->label->resizeToWidth(
+				widget->width() - left - st::historySendRight);
 			state->label->moveToLeft(
 				left,
 				(widget->height() - state->label->height()) / 2,
@@ -4422,6 +4444,10 @@ void SetupRestrictionView(
 
 	widget->sizeValue(
 	) | rpl::on_next(state->updateGeometries, widget->lifetime());
+	peer->session().sendAsPeers().updated(
+	) | rpl::filter([=](Main::SendAsKey key) {
+		return key == Main::SendAsKey(peer);
+	}) | rpl::on_next(state->updateGeometries, widget->lifetime());
 
 	widget->paintRequest() | rpl::on_next([=](QRect clip) {
 		auto p = QPainter(widget);
@@ -4501,7 +4527,7 @@ void ComposeControls::initVoiceRecordBar() {
 
 	_voiceRecordBar->setStartRecordingFilter([=] {
 		const auto error = [&]() -> Data::SendError {
-			const auto peer = _history ? _history->peer.get() : nullptr;
+			const auto peer = sendingPeer();
 			if (peer) {
 				if (const auto error = Data::RestrictionError(
 						peer,
@@ -4585,7 +4611,7 @@ void ComposeControls::initVoiceRecordBar() {
 	}) | rpl::on_next([=](not_null<Shortcuts::Request*> request) {
 		using Command = Shortcuts::Command;
 		if (showRecordButton()
-			&& Data::CanSendAnything(_history->peer, !_topicRootId)) {
+			&& Data::CanSendAnything(sendingPeer(), !_topicRootId)) {
 			const auto isVoice = request->check(Command::RecordVoice, 1);
 			const auto isRound = !isVoice
 				&& request->check(Command::RecordRound, 1);
@@ -4599,7 +4625,7 @@ void ComposeControls::initVoiceRecordBar() {
 		}
 		_field
 			&& _field->isVisible()
-			&& Data::CanSendTexts(_history->peer)
+			&& Data::CanSendTexts(sendingPeer())
 			&& request->check(Command::ComposeAiApplyInPlace, 1)
 			&& request->handle([=] {
 				triggerAiApplyInPlace();
@@ -4895,6 +4921,11 @@ void ComposeControls::updateWrappingVisibility() {
 	}
 	_wrap->setVisible(!hidden && !restricted);
 	updateControlsParents();
+	if (_sendAs && _writeRestricted
+		&& _sendAs->parentWidget() == _writeRestricted.get()) {
+		_sendAs->setVisible(!hidden && restricted);
+		_sendAs->raise();
+	}
 	updateAiButtonVisibility();
 	updateSendAsFileVisibility();
 	updateExpandButtonVisibility();
@@ -4994,7 +5025,7 @@ void ComposeControls::updateSendButtonType() {
 		const auto restriction = (type == Type::Record)
 			? ChatRestriction::SendVoiceMessages
 			: ChatRestriction::SendVideoMessages;
-		return !!Data::RestrictionError(_history->peer, restriction);
+		return !!Data::RestrictionError(sendingPeer(), restriction);
 	}();
 	const auto delay = [&] {
 		return (type != Type::Cancel
@@ -5319,7 +5350,7 @@ bool ComposeControls::canShowRichEditor() const {
 		&& !_recording.current()
 		&& _field->isVisible()
 		&& (isEditingMessage()
-			|| Data::CanSendTexts(_history->peer, !_topicRootId))
+			|| Data::CanSendTexts(sendingPeer(), !_topicRootId))
 		&& (composeEligible || isEditingMessage())
 		&& !textExceedsMaxSize()
 		&& !(media && !media->webpage())
@@ -5708,6 +5739,19 @@ bool ComposeControls::updateSendAsButton(
 		_videoStreamAdmin = false;
 	}
 	return true;
+}
+
+PeerData *ComposeControls::sendingPeer() const {
+	if (!_history) {
+		return nullptr;
+	}
+	const auto peer = _history->peer;
+	if (isEditingMessage()) {
+		return peer;
+	}
+	const auto accountId = session().sendAsPeers().chosenAccount(peer);
+	const auto target = session().sendAsPeers().accountPeer(peer, accountId);
+	return target ? target : peer.get();
 }
 
 void ComposeControls::updateAttachBotsMenu() {

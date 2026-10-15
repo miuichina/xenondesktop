@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "layout/layout_position.h"
 #include "mainwindow.h"
 #include "main/main_session.h"
+#include "main/session/send_as_peers.h"
 #include "window/window_session_controller.h"
 #include "history/view/history_view_cursor_state.h"
 #include "storage/storage_account.h" // Account::writeSavedGifs
@@ -943,7 +944,9 @@ void GifsListWidget::sendInlineRequest() {
 	_inlineRequestId = _api.request(MTPmessages_GetInlineBotResults(
 		MTP_flags(0),
 		_searchBot->inputUser(),
-		_inlineQueryPeer->input(),
+		_inlineQueryPeer->session().sendAsPeers().chosenAccount(_inlineQueryPeer)
+			? MTP_inputPeerSelf()
+			: _inlineQueryPeer->input(),
 		MTPInputGeoPoint(),
 		MTP_string(_inlineQuery),
 		MTP_string(nextOffset)

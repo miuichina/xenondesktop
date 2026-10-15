@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/compose_controls_common.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "main/session/send_as_peers.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "ui/widgets/buttons.h"
@@ -540,6 +541,9 @@ bool BottomControls::isBlocked() const {
 }
 
 bool BottomControls::isJoinChannel() const {
+	if (_peer->session().sendAsPeers().shouldChoose({ _peer })) {
+		return false;
+	}
 	if (_mode != BottomControlsMode::History) {
 		return false;
 	}
@@ -550,6 +554,9 @@ bool BottomControls::isJoinChannel() const {
 }
 
 bool BottomControls::isJoinGroup() const {
+	if (_peer->session().sendAsPeers().shouldChoose({ _peer })) {
+		return false;
+	}
 	if (_mode != BottomControlsMode::Replies) {
 		return false;
 	}
@@ -564,6 +571,9 @@ bool BottomControls::isJoinGroup() const {
 }
 
 bool BottomControls::isMuteUnmute() const {
+	if (_peer->session().sendAsPeers().shouldChoose({ _peer })) {
+		return false;
+	}
 	if (_mode != BottomControlsMode::History) {
 		return false;
 	}

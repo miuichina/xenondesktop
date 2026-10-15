@@ -129,6 +129,21 @@ using PhotoFileLocationId = Data::PhotoFileLocationId;
 using DocumentFileLocationId = Data::DocumentFileLocationId;
 using UpdatedFileReferences = Data::UpdatedFileReferences;
 
+struct AccountForwardState {
+	~AccountForwardState();
+
+	std::vector<FullMsgId> ids;
+	FnMut<void()> success;
+	Fn<void()> restore;
+	int remaining = 0;
+};
+
+AccountForwardState::~AccountForwardState() {
+	if (restore) {
+		restore();
+	}
+}
+
 [[nodiscard]] bool ShouldSkipPlainDraftCloudSave(
 		not_null<Main::Session*> session,
 		not_null<Data::Thread*> thread) {
@@ -576,7 +591,9 @@ void ApiWrap::sendMessageFail(
 			? tr::lng_error_noforwards_user(tr::now)
 			: tr::lng_error_noforwards_group(tr::now), kJoinErrorDuration);
 	} else if (error == u"PREMIUM_ACCOUNT_REQUIRED"_q) {
-		Settings::ShowPremium(&session(), "premium_stickers");
+		if (show) {
+			Settings::ShowPremium(&session(), "premium_stickers");
+		}
 	} else if (error == u"SCHEDULE_TOO_MUCH"_q) {
 		auto &scheduled = _session->scheduledMessages();
 		if (const auto item = scheduled.lookupItem(peer->id, itemId.msg)) {
@@ -3870,6 +3887,21 @@ void ApiWrap::sendAction(const SendAction &action) {
 }
 
 void ApiWrap::finishForwarding(const SendAction &action) {
+	if (action.options.sendFromAccount) {
+		const auto history = action.history;
+		const auto root = action.replyTo.topicRootId;
+		const auto sublist = action.replyTo.monoforumPeerId;
+		auto draft = history->resolveForwardDraft(root, sublist);
+		if (!draft.items.empty()) {
+			forwardMessages(std::move(draft), action, crl::guard(_session, [=] {
+				_session->data().sendHistoryChangeNotifications();
+				_session->changes().historyUpdated(
+					history,
+					Data::HistoryUpdate::Flag::MessageSent);
+			}));
+		}
+		return;
+	}
 	const auto history = action.history;
 	const auto topicRootId = action.replyTo.topicRootId;
 	const auto monoforumPeerId = action.replyTo.monoforumPeerId;
@@ -3905,6 +3937,81 @@ void ApiWrap::forwardMessages(
 		Data::ResolvedForwardDraft &&draft,
 		SendAction action,
 		FnMut<void()> &&successCallback) {
+	if (action.options.sendFromAccount) {
+		const auto original = action;
+		const auto originalPeer = original.history->peer;
+		if (!Api::ResolveAccountSendAction(action)) {
+			return;
+		}
+		const auto target = &action.history->session();
+		const auto weak = base::make_weak(target);
+		const auto state = std::make_shared<AccountForwardState>();
+		if (successCallback) {
+			state->success = crl::guard(_session, std::move(successCallback));
+		}
+		for (const auto item : draft.items) {
+			const auto sourcePeer = item->history()->peer;
+			if (!sourcePeer->isChannel()
+				|| !target->data().peerLoaded(sourcePeer->id)
+				|| !IsServerMsgId(item->id)) {
+				sendMessageFail(
+					tr::lng_send_as_account_unavailable(tr::now),
+					originalPeer);
+				return;
+			}
+			state->ids.push_back(item->fullId());
+		}
+		const auto root = original.replyTo.topicRootId;
+		const auto sublist = original.replyTo.monoforumPeerId;
+		const auto saved = original.history->forwardDraft(root, sublist);
+		if (!saved.ids.empty() && ranges::equal(saved.ids, state->ids)) {
+			original.history->setForwardDraft(root, sublist, {});
+			state->restore = crl::guard(_session, [=] {
+				if (original.history->forwardDraft(root, sublist).ids.empty()) {
+					auto copy = saved;
+					original.history->setForwardDraft(root, sublist, std::move(copy));
+				}
+			});
+		}
+		state->remaining = int(state->ids.size());
+		const auto options = draft.options;
+		const auto ready = crl::guard(_session, [=] {
+			if (!weak || --state->remaining) {
+				return;
+			}
+			auto checked = original;
+			if (!Api::ResolveAccountSendAction(checked)) {
+				return;
+			}
+			auto mapped = Data::ResolvedForwardDraft{ .options = options };
+			for (const auto id : state->ids) {
+				const auto item = target->data().message(id);
+				if (!item) {
+					sendMessageFail(
+						tr::lng_send_as_account_unavailable(tr::now),
+						originalPeer);
+					return;
+				}
+				mapped.items.push_back(item);
+			}
+			state->restore = nullptr;
+			target->api().forwardMessages(
+				std::move(mapped),
+				action,
+				std::move(state->success));
+		});
+		for (const auto id : state->ids) {
+			if (target->data().message(id)) {
+				ready();
+			} else {
+				target->api().requestMessageData(
+					target->data().peerLoaded(id.peer),
+					id.msg,
+					ready);
+			}
+		}
+		return;
+	}
 	Expects(!draft.items.empty());
 
 	auto &histories = _session->data().histories();
@@ -4210,6 +4317,24 @@ void ApiWrap::sendSharedContact(
 		UserId userId,
 		const SendAction &action,
 		Fn<void(bool)> done) {
+	if (action.options.sendFromAccount) {
+		auto routed = action;
+		if (Api::ResolveAccountSendAction(routed)) {
+			sendAction(action);
+			if (done) {
+				done = crl::guard(_session, std::move(done));
+			}
+			routed.history->session().api().sendSharedContact(
+				phone,
+				firstName,
+				lastName,
+				userId,
+				routed,
+				std::move(done));
+			finishForwarding(action);
+		}
+		return;
+	}
 	sendAction(action);
 
 	const auto history = action.history;
@@ -4268,6 +4393,20 @@ void ApiWrap::sendVoiceMessage(
 		crl::time duration,
 		bool video,
 		const SendAction &action) {
+	if (action.options.sendFromAccount) {
+		auto routed = action;
+		if (Api::ResolveAccountSendAction(routed)) {
+			sendAction(action);
+			routed.history->session().api().sendVoiceMessage(
+				std::move(result),
+				std::move(waveform),
+				duration,
+				video,
+				routed);
+			finishForwarding(action);
+		}
+		return;
+	}
 	const auto caption = TextWithTags();
 	const auto to = FileLoadTaskOptions(action);
 	_fileLoader->addTask(
@@ -4345,6 +4484,19 @@ void ApiWrap::sendFiles(
 		SendMediaType type,
 		std::shared_ptr<SendingAlbum> album,
 		SendAction action) {
+	if (action.options.sendFromAccount) {
+		auto routed = action;
+		if (Api::ResolveAccountSendAction(routed)) {
+			sendAction(action);
+			routed.history->session().api().sendFiles(
+				std::move(list),
+				type,
+				std::move(album),
+				routed);
+			finishForwarding(action);
+		}
+		return;
+	}
 	const auto &ephemeral = _session->ephemeralMessages();
 	if (album && !ephemeral.isEphemeralBotReply(action.replyTo.messageId)) {
 		const auto peer = action.history->peer;
@@ -4432,6 +4584,15 @@ void ApiWrap::sendFile(
 		const QByteArray &fileContent,
 		SendMediaType type,
 		const SendAction &action) {
+	if (action.options.sendFromAccount) {
+		auto routed = action;
+		if (Api::ResolveAccountSendAction(routed)) {
+			sendAction(action);
+			routed.history->session().api().sendFile(fileContent, type, routed);
+			finishForwarding(action);
+		}
+		return;
+	}
 	const auto to = FileLoadTaskOptions(action);
 	auto caption = TextWithTags();
 	const auto spoiler = false;
@@ -4513,6 +4674,18 @@ void ApiWrap::sendRichMessage(
 		std::shared_ptr<const Iv::RichPage> page,
 		const MTPInputRichMessage &richMessage,
 		SendAction action) {
+	if (action.options.sendFromAccount) {
+		auto routed = action;
+		if (Api::ResolveAccountSendAction(routed)) {
+			sendAction(action);
+			routed.history->session().api().sendRichMessage(
+				std::move(page),
+				richMessage,
+				routed);
+			finishForwarding(action);
+		}
+		return;
+	}
 	Expects(page != nullptr);
 
 	const auto history = action.history;
@@ -4768,6 +4941,17 @@ void ApiWrap::sendRichMessage(
 void ApiWrap::sendMessage(
 		MessageToSend &&message,
 		std::optional<MsgId> localMessageId) {
+	if (message.action.options.sendFromAccount) {
+		const auto original = message.action;
+		if (Api::ResolveAccountSendAction(message.action)) {
+			sendAction(original);
+			message.webPage.id = 0;
+			const auto api = &message.action.history->session().api();
+			api->sendMessage(std::move(message));
+			finishForwarding(original);
+		}
+		return;
+	}
 	AyuMessages::PrepareDeletedReply(
 		message.action.history,
 		message.textWithTags,
@@ -5130,6 +5314,12 @@ void ApiWrap::sendInlineResult(
 		SendAction action,
 		std::optional<MsgId> localMessageId,
 		Fn<void(bool)> done) {
+	if (action.options.sendFromAccount) {
+		if (done) {
+			done(false);
+		}
+		return;
+	}
 	StripEphemeralReply(_session, action.replyTo);
 	sendAction(action);
 

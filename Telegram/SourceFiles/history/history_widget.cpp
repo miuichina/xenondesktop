@@ -119,6 +119,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/compose_controls_common.h"
 #include "history/view/controls/history_view_characters_limit.h"
 #include "history/view/controls/history_view_compose_ai_button.h"
+#include "history/view/controls/history_view_compose_controls.h"
 #include "history/view/controls/history_view_compose_ai_tooltip.h"
 #include "history/view/controls/history_view_compose_search.h"
 #include "history/view/controls/history_view_forward_panel.h"
@@ -707,7 +708,7 @@ HistoryWidget::HistoryWidget(
 			const auto topic = resolveReplyToTopic();
 			return topic
 				? Data::CanSendAnyOf(topic, Data::FilesSendRestrictions())
-				: Data::CanSendAnyOf(_peer, Data::FilesSendRestrictions());
+				: Data::CanSendAnyOf(sendingPeer(), Data::FilesSendRestrictions());
 		}),
 		crl::guard(this, [=](bool f) { _field->setAcceptDrops(f); }),
 		crl::guard(this, [=] { updateControlsGeometry(); }),
@@ -1328,7 +1329,7 @@ void HistoryWidget::initVoiceRecordBar() {
 		const auto error = [&]() -> Data::SendError {
 			if (_peer) {
 				if (const auto error = Data::RestrictionError(
-						_peer,
+						sendingPeer(),
 						ChatRestriction::SendVoiceMessages)) {
 					return error;
 				}
@@ -1778,9 +1779,7 @@ void HistoryWidget::supportShareContact(Support::Contact contact) {
 		if (!history) {
 			return;
 		}
-		auto options = Api::SendOptions{
-			.sendAs = prepareSendAction({}).options.sendAs,
-		};
+		auto options = prepareSendAction({}).options;
 		auto action = Api::SendAction(history);
 		send(options);
 		options.handleSupportSwitch = Support::HandleSwitch(modifiers);
@@ -2290,7 +2289,8 @@ bool HistoryWidget::suppressSendAction() const {
 		return false;
 	}
 	const auto &ephemeral = session().ephemeralMessages();
-	return ephemeral.isEphemeralBotReply(replyTo().messageId)
+	return session().sendAsPeers().chosenAccount(_peer)
+		|| ephemeral.isEphemeralBotReply(replyTo().messageId)
 		|| (_peer && ephemeral.hasEphemeralCommand(
 			_peer,
 			_field->getLastText()));
@@ -3381,6 +3381,7 @@ void HistoryWidget::showHistory(
 
 		setHistory(nullptr);
 		_list = nullptr;
+		_senderSlowmodeLifetime.destroy();
 		_peer = nullptr;
 		_suggestOptions = nullptr;
 		_sendPayment.clear();
@@ -4188,12 +4189,29 @@ void HistoryWidget::refreshSuggestPostToggle() {
 }
 
 void HistoryWidget::setupSendAsToggle() {
+	const auto selected = lifetime().make_state<std::pair<PeerId, UserId>>();
 	session().sendAsPeers().updated(
 	) | rpl::filter([=](Main::SendAsKey key) {
 		return (key.peer == _peer)
 			&& (key.type == Main::SendAsType::Message);
 	}) | rpl::on_next([=] {
 		refreshSendAsToggle();
+		const auto accountId = session().sendAsPeers().chosenAccount(_peer);
+		const auto current = std::pair(_peer->id, accountId);
+		const auto unavailable = accountId
+			&& !session().sendAsPeers().accountPeer(_peer, accountId);
+		if (*selected != current || unavailable) {
+			_sendPayment.clear();
+			if (unavailable
+				|| (selected->first == current.first && selected->second)) {
+				controller()->hideLayer(anim::type::instant);
+			}
+			*selected = current;
+		}
+		refreshAttachBotsMenu();
+		controller()->tabbedSelector()->setCurrentPeer(_peer);
+		updateCanSendMessage();
+		updateSendRestriction();
 		updateControlsVisibility();
 		updateControlsGeometry();
 		orderWidgets();
@@ -4202,6 +4220,16 @@ void HistoryWidget::setupSendAsToggle() {
 
 void HistoryWidget::refreshSendAsToggle() {
 	Expects(_peer != nullptr);
+	_senderSlowmodeLifetime.destroy();
+	const auto accountId = session().sendAsPeers().chosenAccount(_peer);
+	if (const auto target = session().sendAsPeers().accountPeer(_peer, accountId)) {
+		rpl::combine(
+			HistoryView::SlowmodeSecondsLeft(target),
+			HistoryView::SendDisabledBySlowmode(target)
+		) | rpl::on_next([=] {
+			updateSendButtonType();
+		}, _senderSlowmodeLifetime);
+	}
 
 	const auto key = Main::SendAsKey{ _peer, Main::SendAsType::Message };
 	if (_editMsgId || !session().sendAsPeers().shouldChoose(key)) {
@@ -4234,6 +4262,15 @@ bool HistoryWidget::canWriteMessage() const {
 		&& !isSearching();
 }
 
+PeerData *HistoryWidget::sendingPeer() const {
+	if (!_peer || _editMsgId) {
+		return _peer;
+	}
+	const auto accountId = session().sendAsPeers().chosenAccount(_peer);
+	const auto peer = session().sendAsPeers().accountPeer(_peer, accountId);
+	return peer ? peer : _peer;
+}
+
 void HistoryWidget::updateControlsVisibility() {
 	auto fieldDisabledRemoved = (_fieldDisabled != nullptr);
 	auto fieldVisibilityChanged = false;
@@ -4241,6 +4278,12 @@ void HistoryWidget::updateControlsVisibility() {
 	const auto guard = gsl::finally([&] {
 		if (fieldDisabledRemoved) {
 			_fieldDisabled = nullptr;
+		}
+		if (_sendAs && _history && !_showAnimation
+			&& !_editMsgId && !isSearching() && !isChoosingTheme()
+			&& !isReportMessages()) {
+			_sendAs->show();
+			_sendAs->raise();
 		}
 	});
 	const auto hideField = [&] {
@@ -5823,6 +5866,7 @@ Api::SendAction HistoryWidget::prepareSendAction(
 	}
 
 	result.options.suggest = suggestOptions();
+	result.options = Api::CaptureSendAccount(_history->peer, result.options);
 	result.options.sendAs = _sendAs
 		? _history->session().sendAsPeers().resolveChosen(
 			_history->peer).get()
@@ -5832,17 +5876,19 @@ Api::SendAction HistoryWidget::prepareSendAction(
 }
 
 void HistoryWidget::sendVoice(const VoiceToSend &data) {
+	const auto options = Api::CaptureSendAccount(_peer, data.options);
 	if (Settings::ConfirmSend(
 			controller(),
 			data.video
 				? Settings::SendConfirmation::Media
 				: Settings::SendConfirmation::Voice,
-			data.options.sendConfirmed,
+			options.sendConfirmed,
 			crl::guard(this, [=, history = _history] {
 				if (_history != history) {
 					return;
 				}
 				auto copy = data;
+				copy.options = options;
 				copy.options.sendConfirmed = true;
 				sendVoice(copy);
 			}))) {
@@ -5855,10 +5901,16 @@ void HistoryWidget::sendVoice(const VoiceToSend &data) {
 
 	const auto withPaymentApproved = [=](int approved) {
 		auto copy = data;
+		copy.options = options;
 		copy.options.starsApproved = approved;
 		sendVoice(copy);
 	};
-	auto action = prepareSendAction(data.options);
+	auto action = prepareSendAction(options);
+	auto checkedAction = action;
+	if (!Api::ResolveAccountSendAction(checkedAction)) {
+		controller()->showToast(tr::lng_send_as_account_unavailable(tr::now));
+		return;
+	}
 	const auto checked = checkSendPayment(
 		1 + int(_forwardPanel->items().size()),
 		action.options,
@@ -5911,6 +5963,7 @@ void HistoryWidget::send(Api::SendOptions options) {
 void HistoryWidget::sendRichDraft(
 		std::shared_ptr<const Iv::RichPage> page,
 		Api::SendOptions options) {
+	options = Api::CaptureSendAccount(_peer, options);
 	if (page != nullptr
 		&& Settings::ConfirmSend(
 			controller(),
@@ -6047,6 +6100,7 @@ void HistoryWidget::sendTextWithTags(
 		bool useWebPageDraft,
 		Api::SendOptions options,
 		Fn<void()> done) {
+	options = Api::CaptureSendAccount(_peer, options);
 	if (!textWithTags.text.trimmed().isEmpty()
 		&& Settings::ConfirmSend(
 			controller(),
@@ -6072,6 +6126,11 @@ void HistoryWidget::sendTextWithTags(
 	}
 
 	auto message = Api::MessageToSend(prepareSendAction(options));
+	auto checkedAction = message.action;
+	if (!Api::ResolveAccountSendAction(checkedAction)) {
+		controller()->showToast(tr::lng_send_as_account_unavailable(tr::now));
+		return;
+	}
 	message.textWithTags = textWithTags;
 	if (useWebPageDraft && _preview) {
 		message.webPage = _preview->draft();
@@ -6105,6 +6164,7 @@ void HistoryWidget::sendTextWithTags(
 	const auto hasText = !message.textWithTags.text.trimmed().isEmpty();
 
 	if (hasText
+		&& !message.action.options.sendFromAccount
 		&& message.webPage.url.isEmpty()
 		&& (_field->document()->size().height() <= _field->height())) {
 		controller()->sendingAnimation().appendSending({
@@ -6490,15 +6550,21 @@ bool HistoryWidget::checkSendPayment(
 		int messagesCount,
 		Api::SendOptions options,
 		Fn<void(int)> withPaymentApproved) {
-	return _peer
-		&& _sendPayment.check(
-			controller(),
-			_peer,
-			options,
-			messagesCount,
-			std::move(withPaymentApproved));
+	options = Api::CaptureSendAccount(_peer, options);
+	const auto peer = options.sendFromAccount
+		? session().sendAsPeers().accountPeer(_peer, options.sendFromAccount)
+		: _peer;
+	if (!peer) {
+		controller()->showToast(tr::lng_send_as_account_unavailable(tr::now));
+		return false;
+	}
+	return _sendPayment.check(
+		Main::MakeSessionShow(controller()->uiShow(), &peer->session()),
+		peer,
+		options,
+		messagesCount,
+		std::move(withPaymentApproved));
 }
-
 void HistoryWidget::checkSuggestToGigagroup() {
 	const auto group = _peer ? _peer->asMegagroup() : nullptr;
 	if (!group || !group->owner().suggestToGigagroup(group)) {
@@ -6581,7 +6647,8 @@ void HistoryWidget::chooseAttach(
 				uploadFile(result.remoteContent, SendMediaType::File);
 			}
 		} else {
-			const auto premium = controller()->session().user()->isPremium();
+			const auto peer = sendingPeer();
+	const auto premium = peer ? peer->session().premium() : session().premium();
 			auto list = Storage::PrepareMediaList(
 				result.paths,
 				st::sendMediaPreviewSize,
@@ -6960,7 +7027,7 @@ bool HistoryWidget::isBlocked() const {
 }
 
 bool HistoryWidget::isJoinChannel() const {
-	if (const auto channel = _peer ? _peer->asChannel() : nullptr) {
+	if (const auto channel = _peer ? sendingPeer()->asChannel() : nullptr) {
 		return !channel->amIn() && !channel->isMonoforum();
 	}
 	return false;
@@ -6972,10 +7039,10 @@ bool HistoryWidget::isChoosingTheme() const {
 
 bool HistoryWidget::isMuteUnmute() const {
 	return _peer
-		&& ((_peer->isBroadcast() && !_peer->asChannel()->canPostMessages())
-			|| (_peer->isGigagroup() && !Data::CanSendAnything(_peer))
-			|| _peer->isRepliesChat()
-			|| _peer->isVerifyCodes());
+		&& ((sendingPeer()->isBroadcast() && !sendingPeer()->asChannel()->canPostMessages())
+			|| (sendingPeer()->isGigagroup() && !Data::CanSendAnything(sendingPeer()))
+			|| sendingPeer()->isRepliesChat()
+			|| sendingPeer()->isVerifyCodes());
 }
 
 bool HistoryWidget::isSearching() const {
@@ -7028,24 +7095,25 @@ void HistoryWidget::updateSendButtonType() {
 		const auto restriction = (type == Type::Record)
 			? ChatRestriction::SendVoiceMessages
 			: ChatRestriction::SendVideoMessages;
-		return !!Data::RestrictionError(_peer, restriction);
+		return !!Data::RestrictionError(sendingPeer(), restriction);
 	}();
 	// This logic is duplicated in ChatWidget.
 	const auto disabledBySlowmode = _peer
-		&& _peer->slowmodeApplied()
-		&& (_history->latestSendingMessage() != nullptr);
+		&& sendingPeer()->slowmodeApplied()
+		&& (sendingPeer()->owner().history(sendingPeer())->latestSendingMessage()
+			!= nullptr);
 	const auto delay = [&] {
 		return (type != Type::Cancel
 			&& type != Type::Save
 			&& type != Type::Stop
 			&& _peer)
-			? _peer->slowmodeSecondsLeft()
+			? sendingPeer()->slowmodeSecondsLeft()
 			: 0;
 	}();
 	const auto ephemeralReply = session().ephemeralMessages()
 		.isEphemeralBotReply(replyTo().messageId);
 	const auto perMessage = (_peer && !ephemeralReply)
-		? _peer->starsPerMessageChecked()
+		? sendingPeer()->starsPerMessageChecked()
 		: 0;
 	const auto richPage = shownRichMessage();
 	const auto richMessage = (richPage != nullptr);
@@ -7680,7 +7748,10 @@ void HistoryWidget::moveFieldControls() {
 	_attachToggle->moveToLeft(left, buttonsBottom);
 	left += _attachToggle->width();
 	if (_sendAs) {
-		_sendAs->moveToLeft(left, buttonsBottom);
+		const auto readOnly = !_canSendMessages || isMuteUnmute();
+		_sendAs->moveToLeft(
+			readOnly ? st::historySendRight : left,
+			buttonsBottom);
 		left += _sendAs->width();
 	}
 	const auto fieldTop = bottom - fieldHeight() - st::historySendPadding;
@@ -7746,13 +7817,21 @@ void HistoryWidget::moveFieldControls() {
 		bottom - _botStart->height(),
 		width(),
 		_botStart->height());
+	const auto senderSkip = (_sendAs && !_canSendMessages)
+		? (_sendAs->width() + st::historySendRight)
+		: 0;
+	const auto senderButtonRect = myrtlrect(
+		senderSkip,
+		bottom - _botStart->height(),
+		width() - senderSkip,
+		_botStart->height());
 	_botStart->setGeometry(fullWidthButtonRect);
 	_unblock->setGeometry(fullWidthButtonRect);
-	_joinChannel->setGeometry(fullWidthButtonRect);
-	_muteUnmute->setGeometry(fullWidthButtonRect);
+	_joinChannel->setGeometry(senderButtonRect);
+	_muteUnmute->setGeometry(senderButtonRect);
 	_reportMessages->setGeometry(fullWidthButtonRect);
 	if (_sendRestriction) {
-		_sendRestriction->setGeometry(fullWidthButtonRect);
+		_sendRestriction->setGeometry(senderButtonRect);
 	}
 }
 
@@ -7928,7 +8007,7 @@ bool HistoryWidget::showSendingFilesError(
 		.isEphemeralBotReply(replyTo().messageId);
 	return Data::ShowSendError(
 		show,
-		_peer,
+		sendingPeer(),
 		list,
 		std::nullopt,
 		false,
@@ -7941,7 +8020,7 @@ bool HistoryWidget::showSendingFilesError(
 		.isEphemeralBotReply(replyTo().messageId);
 	return Data::ShowSendError(
 		controller()->uiShow(),
-		_peer,
+		sendingPeer(),
 		bundle,
 		false,
 		ephemeralReply);
@@ -7994,7 +8073,7 @@ bool HistoryWidget::showSendMessageError(
 		.ignoreRestrictions = ephemeral,
 	};
 	request.messagesCount = ComputeSendingMessagesCount(_history, request);
-	const auto error = GetErrorForSending(_peer, request);
+	const auto error = GetErrorForSending(sendingPeer(), request);
 	if (error) {
 		Data::ShowSendErrorToast(controller(), _peer, error);
 		return true;
@@ -8026,7 +8105,7 @@ bool HistoryWidget::showSendRichDraftError(
 		.ignoreRestrictions = ephemeral,
 	};
 	request.messagesCount = ComputeSendingMessagesCount(_history, request);
-	const auto error = GetErrorForSending(_peer, request);
+	const auto error = GetErrorForSending(sendingPeer(), request);
 	if (error) {
 		Data::ShowSendErrorToast(controller(), _peer, error);
 		return true;
@@ -8051,7 +8130,8 @@ bool HistoryWidget::confirmSendingFiles(not_null<const QMimeData*> data) {
 bool HistoryWidget::confirmSendingFiles(
 		const QStringList &files,
 		const QString &insertTextOnCancel) {
-	const auto premium = controller()->session().user()->isPremium();
+	const auto peer = sendingPeer();
+	const auto premium = peer ? peer->session().premium() : session().premium();
 	return confirmSendingFiles(
 		Storage::PrepareMediaList(files, st::sendMediaPreviewSize, premium),
 		insertTextOnCancel);
@@ -8083,6 +8163,7 @@ bool HistoryWidget::confirmSendingFiles(
 	const auto position = cursor.position();
 	const auto anchor = cursor.anchor();
 	const auto text = _field->getTextWithTags();
+	const auto senderOptions = Api::CaptureSendAccount(_peer, {});
 	auto box = Box<SendFilesBox>(
 		controller(),
 		std::move(list),
@@ -8100,6 +8181,8 @@ bool HistoryWidget::confirmSendingFiles(
 		if (!currentReplyTo.messageId && replyTo().messageId) {
 			cancelReply();
 		}
+		options.sendFromAccount = senderOptions.sendFromAccount;
+		options.sendAccountCaptured = true;
 		sendingFilesConfirmed(std::move(bundle), options);
 	}));
 	box->setStashCallbacks(
@@ -8132,6 +8215,7 @@ bool HistoryWidget::confirmSendingFiles(
 void HistoryWidget::sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options) {
+	options = Api::CaptureSendAccount(_peer, options);
 	const auto confirmation = Settings::BundleSendConfirmation(*bundle);
 	if (confirmation
 		&& Settings::ConfirmSend(
@@ -8232,7 +8316,8 @@ bool HistoryWidget::confirmSendingFiles(
 	}
 
 	const auto hasImage = data->hasImage();
-	const auto premium = controller()->session().user()->isPremium();
+	const auto peer = sendingPeer();
+	const auto premium = peer ? peer->session().premium() : session().premium();
 
 	if (const auto urls = Core::ReadMimeUrls(data); !urls.empty()) {
 		const auto folder = Storage::SingleFolderPath(urls);
@@ -8651,9 +8736,15 @@ int HistoryWidget::countAutomaticScrollTop() {
 }
 
 Data::SendError HistoryWidget::computeSendRestriction() const {
+	if (_peer) {
+		const auto accountId = session().sendAsPeers().chosenAccount(_peer);
+		if (accountId && !session().sendAsPeers().accountPeer(_peer, accountId)) {
+			return tr::lng_send_as_account_unavailable(tr::now);
+		}
+	}
 	if (!_canSendMessages
-		&& _peer->amMonoforumAdmin()
-		&& !_peer->asChannel()->monoforumDisabled()) {
+		&& sendingPeer()->amMonoforumAdmin()
+		&& !sendingPeer()->asChannel()->monoforumDisabled()) {
 		return Data::SendError({
 			.text = tr::lng_monoforum_choose_to_reply(tr::now),
 			.monoforumAdmin = true,
@@ -8661,8 +8752,8 @@ Data::SendError HistoryWidget::computeSendRestriction() const {
 	}
 	const auto allWithoutPolls = Data::AllSendRestrictions()
 		& ~ChatRestriction::SendPolls;
-	return (_peer && !Data::CanSendAnyOf(_peer, allWithoutPolls))
-		? Data::RestrictionError(_peer, ChatRestriction::SendOther)
+	return (_peer && !Data::CanSendAnyOf(sendingPeer(), allWithoutPolls))
+		? Data::RestrictionError(sendingPeer(), ChatRestriction::SendOther)
 		: Data::SendError();
 }
 
@@ -9574,12 +9665,12 @@ bool HistoryWidget::replyToNextMessage() {
 
 bool HistoryWidget::showSlowmodeError() {
 	const auto text = [&] {
-		if (const auto left = _peer->slowmodeSecondsLeft()) {
+		if (const auto left = sendingPeer()->slowmodeSecondsLeft()) {
 			return tr::lng_slowmode_enabled(
 				tr::now,
 				lt_left,
 				Ui::FormatDurationWordsSlowmode(left));
-		} else if (_peer->slowmodeApplied()) {
+		} else if (sendingPeer()->slowmodeApplied()) {
 			if (const auto item = _history->latestSendingMessage()) {
 				if (item->mainView()) {
 					animatedScrollToItem(item->id);
@@ -9598,6 +9689,12 @@ bool HistoryWidget::showSlowmodeError() {
 }
 
 void HistoryWidget::sendInlineResult(InlineBots::ResultSelected result) {
+	result.options = Api::CaptureSendAccount(_peer, result.options);
+	const auto document = result.result->document();
+	if (result.options.sendFromAccount && (!document || !document->isAnimation())) {
+		controller()->showToast(tr::lng_send_as_inline_unavailable(tr::now));
+		return;
+	}
 	if (Settings::ConfirmSend(
 			controller(),
 			result.result->document()
@@ -9614,6 +9711,16 @@ void HistoryWidget::sendInlineResult(InlineBots::ResultSelected result) {
 				copy.options.sendConfirmed = true;
 				sendInlineResult(copy);
 			}))) {
+		return;
+	}
+
+	if (result.options.sendFromAccount) {
+		if (sendExistingDocument(
+				document,
+				Api::MessageToSend(prepareSendAction(result.options)))) {
+			clearFieldText();
+			saveDraftWithTextNow();
+		}
 		return;
 	}
 
@@ -10283,6 +10390,13 @@ bool HistoryWidget::sendExistingDocument(
 		not_null<DocumentData*> document,
 		Api::MessageToSend messageToSend,
 		std::optional<MsgId> localId) {
+	if (messageToSend.action.options.sendFromAccount) {
+		auto checkedAction = messageToSend.action;
+		if (!Api::ResolveAccountSendAction(checkedAction)) {
+			controller()->showToast(tr::lng_send_as_account_unavailable(tr::now));
+			return false;
+		}
+	}
 	if (Settings::ConfirmSend(
 			controller(),
 			Settings::DocumentSendConfirmation(document),
@@ -10301,7 +10415,7 @@ bool HistoryWidget::sendExistingDocument(
 	const auto ephemeralReply = session().ephemeralMessages()
 		.isEphemeralBotReply(messageToSend.action.replyTo.messageId);
 	const auto error = (_peer && !ephemeralReply)
-		? Data::RestrictionError(_peer, ChatRestriction::SendStickers)
+		? Data::RestrictionError(sendingPeer(), document->requiredSendRight())
 		: Data::SendError();
 	if (error) {
 		Data::ShowSendErrorToast(controller(), _peer, error);
@@ -10309,7 +10423,8 @@ bool HistoryWidget::sendExistingDocument(
 	} else if (!_peer
 		|| !_canSendMessages
 		|| (!ephemeralReply && showSlowmodeError())
-		|| ShowSendPremiumError(controller(), document)) {
+		|| (!messageToSend.action.options.sendFromAccount
+			&& ShowSendPremiumError(controller(), document))) {
 		return false;
 	}
 	if (!ephemeralReply) {
@@ -10349,6 +10464,7 @@ bool HistoryWidget::sendExistingDocument(
 bool HistoryWidget::sendExistingPhoto(
 		not_null<PhotoData*> photo,
 		Api::SendOptions options) {
+	options = Api::CaptureSendAccount(_peer, options);
 	if (Settings::ConfirmSend(
 			controller(),
 			Settings::SendConfirmation::Media,
@@ -10367,7 +10483,7 @@ bool HistoryWidget::sendExistingPhoto(
 	const auto ephemeralReply = session().ephemeralMessages()
 		.isEphemeralBotReply(replyTo().messageId);
 	const auto error = (_peer && !ephemeralReply)
-		? Data::RestrictionError(_peer, ChatRestriction::SendPhotos)
+		? Data::RestrictionError(sendingPeer(), ChatRestriction::SendPhotos)
 		: Data::SendError();
 	if (error) {
 		Data::ShowSendErrorToast(controller(), _peer, error);
@@ -10677,7 +10793,7 @@ void HistoryWidget::processReply() {
 		} else {
 			forum->requestTopic(topicRootId, processContinue());
 		}
-	} else if (!Data::CanSendAnything(_peer)) {
+	} else if (!Data::CanSendAnything(sendingPeer())) {
 		return processCancel();
 	}
 	setReplyFieldsFromProcessing();
@@ -11104,22 +11220,26 @@ bool HistoryWidget::updateCanSendMessage() {
 	if (!_peer) {
 		return false;
 	}
-	const auto topic = resolveReplyToTopic();
+	const auto peer = sendingPeer();
+	const auto accountId = session().sendAsPeers().chosenAccount(_peer);
+	const auto unavailable = accountId
+		&& !session().sendAsPeers().accountPeer(_peer, accountId);
+	const auto topic = peer->forumTopicFor(resolveReplyToTopicRootId());
 	const auto allWithoutPolls = Data::AllSendRestrictions()
 		& ~ChatRestriction::SendPolls;
 	const auto onlyReplies = _peer->amMonoforumAdmin();
 	const auto restrictedOnlyReplies = onlyReplies
 		&& (!_replyTo.messageId || _replyTo.messageId.peer != _peer->id);
-	const auto newCanSendMessages = restrictedOnlyReplies
+	const auto newCanSendMessages = (restrictedOnlyReplies || unavailable)
 		? false
 		: topic
 		? Data::CanSendAnyOf(topic, allWithoutPolls)
-		: Data::CanSendAnyOf(_peer, allWithoutPolls);
-	const auto newCanSendTexts = restrictedOnlyReplies
+		: Data::CanSendAnyOf(peer, allWithoutPolls);
+	const auto newCanSendTexts = (restrictedOnlyReplies || unavailable)
 		? false
 		: topic
 		? Data::CanSend(topic, ChatRestriction::SendOther)
-		: Data::CanSend(_peer, ChatRestriction::SendOther);
+		: Data::CanSend(peer, ChatRestriction::SendOther);
 	if (_canSendMessages == newCanSendMessages
 		&& _canSendTexts == newCanSendTexts) {
 		return false;
@@ -11939,6 +12059,14 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 					drawField(p, clip);
 				}
 			}
+		}
+		if (_sendAs && !_sendAs->isHidden()
+			&& (!_canSendMessages || isMuteUnmute())) {
+			p.fillRect(
+				_botStart->geometry(),
+				(_sendRestriction && !_sendRestriction->isHidden())
+					? st::windowBg
+					: st::historyComposeButtonBg);
 		}
 	} else {
 		const auto w = 0

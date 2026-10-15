@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "window/window_session_controller.h"
 #include "main/main_session.h"
+#include "main/session/send_as_peers.h"
 #include "main/main_session_settings.h"
 #include "storage/localstorage.h"
 #include "data/data_channel.h"
@@ -42,6 +43,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat_helpers.h"
 
 namespace ChatHelpers {
+
+namespace {
+
+[[nodiscard]] PeerData *SendingPeer(PeerData *peer) {
+	if (!peer) {
+		return nullptr;
+	}
+	const auto id = peer->session().sendAsPeers().chosenAccount(peer);
+	const auto target = peer->session().sendAsPeers().accountPeer(peer, id);
+	return target ? target : peer;
+}
+
+} // namespace
+
 
 class TabbedSelector::SlideAnimation : public Ui::RoundShadowAnimation {
 public:
@@ -481,6 +496,13 @@ TabbedSelector::TabbedSelector(
 		_tabsSlider->raise();
 	}
 
+	session().sendAsPeers().updated(
+	) | rpl::filter([=](Main::SendAsKey key) {
+		return key.peer == _currentPeer && key.type == Main::SendAsType::Message;
+	}) | rpl::on_next([=] {
+		checkRestrictedPeer();
+	}, lifetime());
+
 	if (hasStickersTab()
 		|| hasGifsTab()
 		|| (hasEmojiTab() && _mode == Mode::Full)) {
@@ -503,7 +525,7 @@ TabbedSelector::TabbedSelector(
 			stickers()->showStickerSet(setId);
 			if (_currentPeer
 				&& Data::CanSend(
-					_currentPeer,
+					SendingPeer(_currentPeer),
 					ChatRestriction::SendStickers)) {
 				_showRequests.fire({});
 			}
@@ -534,7 +556,7 @@ TabbedSelector::TabbedSelector(
 		) | rpl::on_next([=](uint64 setId) {
 			_tabsSlider->setActiveSection(indexByType(SelectorTab::Emoji));
 			emoji()->showSet(setId);
-			if (_currentPeer && Data::CanSendTexts(_currentPeer)) {
+			if (_currentPeer && Data::CanSendTexts(SendingPeer(_currentPeer))) {
 				_showRequests.fire({});
 			}
 		}, lifetime());
@@ -1166,18 +1188,18 @@ void TabbedSelector::checkRestrictedPeer() {
 	if (_currentPeer) {
 		const auto error = (_currentTabType == SelectorTab::Stickers)
 			? Data::RestrictionError(
-				_currentPeer,
+				SendingPeer(_currentPeer),
 				ChatRestriction::SendStickers)
 			: (_currentTabType == SelectorTab::Gifs)
 			? Data::RestrictionError(
-				_currentPeer,
+				SendingPeer(_currentPeer),
 				ChatRestriction::SendGifs)
 			: (_currentTabType == SelectorTab::Emoji && _mode == Mode::Full)
 			? ((true || Data::RestrictionError(
-				_currentPeer, // We don't allow input if texts are forbidden.
+				SendingPeer(_currentPeer), // We don't allow input if texts are forbidden.
 				ChatRestriction::SendInline))
 				? Data::RestrictionError(
-					_currentPeer,
+					SendingPeer(_currentPeer),
 					ChatRestriction::SendOther)
 				: Data::SendError())
 			: Data::SendError();

@@ -14,7 +14,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
 #include "data/data_photo.h"
+#include "data/data_photo_media.h"
 #include "data/data_channel.h" // ChannelData::addsSignature.
 #include "data/data_user.h" // UserData::name
 #include "data/data_session.h"
@@ -24,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/components/ephemeral_messages.h"
 #include "data/components/welcome_messages.h"
 #include "data/stickers/data_stickers.h"
+#include "data/stickers/data_stickers_set.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h" // NewMessageFlags.
@@ -32,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_entity.h" // TextWithEntities.
 #include "ui/item_text_options.h" // Ui::ItemTextOptions.
 #include "ui/chat/attach/attach_prepare.h"
+#include "ui/image/image.h"
 #include "main/main_session.h"
 #include "main/main_app_config.h"
 #include "storage/localimageloader.h"
@@ -39,8 +43,39 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "apiwrap.h"
 
+#include <QtCore/QBuffer>
+
 namespace Api {
 namespace {
+
+void WaitForAccountMedia(
+		not_null<Main::Session*> source,
+		Fn<bool()> finished,
+		Fn<void()> send) {
+	if (finished()) {
+		send();
+		return;
+	}
+	const auto lifetime = std::make_shared<rpl::lifetime>();
+	source->lifetime().add([weak = std::weak_ptr(lifetime)] {
+		if (const auto strong = weak.lock()) {
+			strong->destroy();
+		}
+	});
+	source->downloaderTaskFinished(
+	) | rpl::filter(std::move(finished)) | rpl::take(1) | rpl::on_next([=] {
+		lifetime->destroy();
+		send();
+	}, *lifetime);
+}
+
+bool AccountMediaSendAllowed(
+		const SendAction &action,
+		ChatRestriction restriction) {
+	const auto peer = action.history->peer;
+	return !peer->session().frozen()
+		&& Data::CanSend(peer, restriction);
+}
 
 void InnerFillMessagePostFlags(
 		const SendOptions &options,
@@ -71,6 +106,14 @@ void InnerFillMessagePostFlags(
 }
 
 void SendSimpleMedia(SendAction action, MTPInputMedia inputMedia) {
+	const auto original = action;
+	if (!ResolveAccountSendAction(action)) {
+		return;
+	}
+	if (original.options.sendFromAccount) {
+		original.history->session().api().sendAction(original);
+		original.history->session().api().finishForwarding(original);
+	}
 	const auto history = action.history;
 	const auto peer = history->peer;
 	const auto session = &history->session();
@@ -708,6 +751,74 @@ void SendExistingDocument(
 		MessageToSend &&message,
 		not_null<DocumentData*> document,
 		std::optional<MsgId> localMessageId) {
+	if (message.action.options.sendFromAccount) {
+		if (document->forbidsFileSave()) {
+			message.action.history->session().api().sendMessageFail(
+				u"CHAT_FORWARDS_RESTRICTED"_q,
+				message.action.history->peer);
+			return;
+		}
+		const auto source = &message.action.history->session();
+		const auto original = message.action;
+		if (!ResolveAccountSendAction(message.action)) {
+			return;
+		}
+		const auto session = &message.action.history->session();
+		const auto weak = base::make_weak(session);
+		const auto right = document->requiredSendRight();
+		if (!AccountMediaSendAllowed(message.action, right)) {
+			return;
+		}
+		if (const auto sticker = document->sticker()) {
+			const auto id = document->id;
+			session->api().request(MTPmessages_GetStickerSet(
+				Data::InputStickerSet(sticker->set),
+				MTP_int(0)
+			)).done([=](const MTPmessages_StickerSet &result) {
+				if (!AccountMediaSendAllowed(message.action, right)) {
+					return;
+				}
+				result.match([&](const MTPDmessages_stickerSet &data) {
+					for (const auto &entry : data.vdocuments().v) {
+						const auto other = session->data().processDocument(entry);
+						if (other->id == id) {
+							auto copy = message;
+							SendExistingDocument(std::move(copy), other);
+							break;
+						}
+					}
+				}, [](const MTPDmessages_stickerSetNotModified &) {});
+			}).fail([=](const MTP::Error &error) {
+				session->api().sendMessageFail(error, message.action.history->peer);
+			}).send();
+		} else {
+			const auto media = document->createMediaView();
+			document->save(document->stickerOrGifOrigin(), QString());
+			WaitForAccountMedia(source, [=] {
+				return media->loaded() || !document->loading();
+			}, [=] {
+				if (!weak || !media->loaded()
+					|| !AccountMediaSendAllowed(message.action, right)) {
+					return;
+				}
+				auto file = Ui::PreparedFile(document->filepath(true));
+				file.content = media->bytes();
+				file.displayName = document->filename();
+				file.caption = message.textWithTags;
+				file.spoiler = message.action.options.mediaSpoiler;
+				auto list = Ui::PreparedList();
+				list.files.push_back(std::move(file));
+				session->api().sendFiles(
+					std::move(list),
+					SendMediaType::File,
+					nullptr,
+					message.action);
+			});
+		}
+		source->api().sendAction(original);
+		source->api().finishForwarding(original);
+		return;
+	}
 	const auto inputMedia = [=] {
 		return MTP_inputMediaDocument(
 			MTP_flags(message.action.options.mediaSpoiler
@@ -735,6 +846,16 @@ void SendMusicSelection(
 		MessageToSend &&message,
 		std::vector<MusicSelectionItem> items) {
 	if (items.empty()) {
+		return;
+	}
+	if (message.action.options.sendFromAccount) {
+		for (auto i = 0; i != int(items.size()); ++i) {
+			auto copy = message;
+			if (i + 1 != int(items.size())) {
+				copy.textWithTags = {};
+			}
+			SendExistingDocument(std::move(copy), items[i].document);
+		}
 		return;
 	}
 
@@ -790,6 +911,50 @@ void SendExistingPhoto(
 		MessageToSend &&message,
 		not_null<PhotoData*> photo,
 		std::optional<MsgId> localMessageId) {
+	if (message.action.options.sendFromAccount) {
+		const auto source = &message.action.history->session();
+		const auto original = message.action;
+		if (!ResolveAccountSendAction(message.action)) {
+			return;
+		}
+		const auto session = &message.action.history->session();
+		const auto weak = base::make_weak(session);
+		const auto media = photo->createMediaView();
+		media->wanted(Data::PhotoSize::Large, Data::FileOrigin());
+		WaitForAccountMedia(source, [=] {
+			return media->loaded() || photo->failed(Data::PhotoSize::Large);
+		}, [=] {
+			if (!weak || !media->loaded()
+				|| !AccountMediaSendAllowed(
+					message.action,
+					ChatRestriction::SendPhotos)) {
+				return;
+			}
+			auto file = Ui::PreparedFile(QString());
+			file.content = media->imageBytes(Data::PhotoSize::Large);
+			if (file.content.isEmpty()) {
+				const auto image = media->image(Data::PhotoSize::Large);
+				auto buffer = QBuffer(&file.content);
+				if (!buffer.open(QIODevice::WriteOnly)
+					|| !image
+					|| !image->original().save(&buffer, "PNG")) {
+					return;
+				}
+			}
+			file.caption = message.textWithTags;
+			file.spoiler = message.action.options.mediaSpoiler;
+			auto list = Ui::PreparedList();
+			list.files.push_back(std::move(file));
+			session->api().sendFiles(
+				std::move(list),
+				SendMediaType::Photo,
+				nullptr,
+				message.action);
+		});
+		source->api().sendAction(original);
+		source->api().finishForwarding(original);
+		return;
+	}
 	const auto inputMedia = [=] {
 		return MTP_inputMediaPhoto(
 			MTP_flags(0),

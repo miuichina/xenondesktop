@@ -462,6 +462,18 @@ bool SendPaymentHelper::check(
 		Fn<void(int)> resend,
 		PaidConfirmStyles styles) {
 	clear();
+	const auto watchSender = [&] {
+		if (!options.sendFromAccount) {
+			return;
+		}
+		peer->session().account().sessionChanges(
+		) | rpl::filter([=](Main::Session *session) {
+			return !session || session->userId() != options.sendFromAccount;
+		}) | rpl::take(1) | rpl::on_next([=] {
+			clear();
+			show->hideLayer(anim::type::instant);
+		}, _lifetime);
+	};
 
 	const auto admin = peer->amMonoforumAdmin();
 	const auto suggest = options.suggest;
@@ -475,6 +487,7 @@ bool SendPaymentHelper::check(
 	const auto details = ComputePaymentDetails(peer, messagesCount);
 	const auto suggestDetails = SuggestPaymentDataReady(peer, suggest);
 	if (!details || !suggestDetails) {
+		watchSender();
 		_resend = [=] { resend(starsApproved); };
 
 		if ((!details || !suggest.ton)
@@ -512,6 +525,7 @@ bool SendPaymentHelper::check(
 
 		return false;
 	} else if (const auto stars = details->stars; stars > starsApproved) {
+		watchSender();
 		ShowSendPaidConfirm(show, peer, *details, [=] {
 			resend(stars);
 		}, styles, checkSuggestPriceStars);

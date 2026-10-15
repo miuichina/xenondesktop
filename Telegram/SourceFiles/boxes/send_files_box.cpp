@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "main/session/send_as_peers.h"
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
 #include "chat_helpers/message_field.h"
@@ -374,6 +375,12 @@ void EditPriceBox(
 } // namespace
 
 SendFilesLimits DefaultLimitsForPeer(not_null<PeerData*> peer) {
+	const auto accountId = peer->session().sendAsPeers().chosenAccount(peer);
+	if (const auto target = peer->session().sendAsPeers().accountPeer(
+			peer,
+			accountId)) {
+		peer = target;
+	}
 	using Flag = SendFilesAllow;
 	using Restriction = ChatRestriction;
 	const auto allowByRestriction = [&](Restriction check, Flag allow) {
@@ -402,11 +409,21 @@ SendFilesCheck DefaultCheckForPeer(
 SendFilesCheck DefaultCheckForPeer(
 		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<PeerData*> peer) {
+	const auto accountId = peer->session().sendAsPeers().chosenAccount(peer);
 	return [=](
 			const Ui::PreparedFile &file,
 			bool compress,
 			bool silent) {
-		const auto error = Data::FileRestrictionError(peer, file, compress);
+		const auto target = accountId
+			? peer->session().sendAsPeers().accountPeer(peer, accountId)
+			: peer.get();
+		if (!target) {
+			if (!silent) {
+				show->showToast(tr::lng_send_as_account_unavailable(tr::now));
+			}
+			return false;
+		}
+		const auto error = Data::FileRestrictionError(target, file, compress);
 		if (error && !silent) {
 			Data::ShowSendErrorToast(show, peer, error);
 		}

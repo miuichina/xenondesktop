@@ -61,6 +61,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "main/session/send_as_peers.h"
 #include "mainwidget.h"
 #include "payments/payments_checkout_process.h"
 #include "payments/payments_non_panel_process.h"
@@ -3002,13 +3003,16 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		Fn<void(bool)> attach,
 		Fn<TextWithTags()> composeFieldText,
 		Fn<void()> composeFieldMigrated) {
+	const auto accountId = peer->session().sendAsPeers().chosenAccount(peer);
+	const auto target = peer->session().sendAsPeers().accountPeer(peer, accountId);
+	const auto rightsPeer = target ? target : peer.get();
 	auto result = std::make_unique<Ui::DropdownMenu>(
 		parent,
 		st::dropdownMenuWithIcons);
 	const auto bots = &peer->session().attachWebView();
 	const auto raw = result.get();
 	auto minimal = 0;
-	if (Data::CanSend(peer, ChatRestriction::SendPhotos, false)) {
+	if (Data::CanSend(rightsPeer, ChatRestriction::SendPhotos, false)) {
 		++minimal;
 		raw->addAction(tr::lng_attach_photo_or_video(tr::now), [=] {
 			attach(true);
@@ -3019,14 +3023,14 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		| ChatRestriction::SendStickers
 		| ChatRestriction::SendMusic
 		| ChatRestriction::SendFiles;
-	if (Data::CanSendAnyOf(peer, fileTypes, false)) {
+	if (Data::CanSendAnyOf(rightsPeer, fileTypes, false)) {
 		++minimal;
 		raw->addAction(tr::lng_attach_document(tr::now), [=] {
 			attach(false);
 		}, &st::menuIconFile);
 	}
 	const auto moneyIndex = int(raw->actions().size());
-	if (peer->canCreatePolls(false)) {
+	if (rightsPeer->canCreatePolls(false)) {
 		++minimal;
 		raw->addAction(tr::lng_polls_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
@@ -3045,7 +3049,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				sendMenuDetails());
 		}, &st::menuIconCreatePoll);
 	}
-	if (peer->canCreateTodoLists(false)) {
+	if (rightsPeer->canCreateTodoLists(false)) {
 		++minimal;
 		raw->addAction(tr::lng_todo_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
@@ -3062,7 +3066,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		}, &st::menuIconCreateTodoList);
 	}
 	if (Iv::Editor::CanAuthorRichMessages(&controller->session())
-		&& Data::CanSendAnyOf(peer, ChatRestriction::SendOther, false)) {
+		&& Data::CanSendAnyOf(rightsPeer, ChatRestriction::SendOther, false)) {
 		raw->addAction(tr::lng_article_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
 			const auto details = sendMenuDetails();
@@ -3078,14 +3082,14 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 	const auto session = &controller->session();
 	const auto locationType = ChatRestriction::SendOther;
 	const auto config = ResolveMapsConfig(session);
-	if (Data::CanSendAnyOf(peer, locationType, false)
+	if (Data::CanSendAnyOf(rightsPeer, locationType, false)
 		&& Ui::LocationPicker::Available(config)) {
 		raw->addAction(tr::lng_maps_point(tr::now), [=] {
 			Ui::PreventDelayedActivation();
 			ChooseAndSendLocation(controller, config, actionFactory());
 		}, &st::menuIconAddress);
 	}
-	if (Data::CanSend(peer, ChatRestriction::SendMusic, false)) {
+	if (Data::CanSend(rightsPeer, ChatRestriction::SendMusic, false)) {
 		++minimal;
 		raw->addAction(tr::lng_all_music(tr::now), [=] {
 			const auto box = controller->show(
@@ -3097,7 +3101,8 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 			}
 		}, &st::menuIconSoundOn);
 	}
-	const auto addBots = Data::CanSend(peer, ChatRestriction::SendInline, false)
+	const auto addBots = !accountId
+		&& Data::CanSend(rightsPeer, ChatRestriction::SendInline, false)
 		&& !peer->starsPerMessageChecked();
 	for (const auto &bot : bots->attachBots()) {
 		if (!addBots

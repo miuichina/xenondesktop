@@ -38,6 +38,25 @@ void TodoLists::create(
 		SendAction action,
 		Fn<void()> done,
 		Fn<void(QString)> fail) {
+	if (action.options.sendFromAccount) {
+		const auto original = action;
+		if (ResolveAccountSendAction(action)) {
+			_session->api().sendAction(original);
+			if (done) {
+				done = crl::guard(_session, std::move(done));
+			}
+			if (fail) {
+				fail = crl::guard(_session, std::move(fail));
+			}
+			action.history->session().api().todoLists().create(
+				data,
+				action,
+				std::move(done),
+				std::move(fail));
+			_session->api().finishForwarding(original);
+		}
+		return;
+	}
 	StripEphemeralReply(_session, action.replyTo);
 	_session->api().sendAction(action);
 
