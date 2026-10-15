@@ -56,7 +56,7 @@ bool ResolveAccountSendAction(SendAction &action) {
 	action.options.sendFromAccount = 0;
 	action.options.sendAs = target->isBroadcast()
 		? nullptr
-		: target->session().user();
+		: target->session().user().get();
 	action.options.suggest = {};
 	action.clearDraft = false;
 	return true;

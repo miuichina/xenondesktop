@@ -42,7 +42,7 @@ jobs:
           "DEPENDENCY_KEY=windows-x64-msvc144-qt6-release-v2-$key" >> $env:GITHUB_ENV
           "LEGACY_DEPENDENCY_KEY=windows-x64-msvc144-qt6-release-v1-$key" >> $env:GITHUB_ENV
 
-      - name: Install ATL for MSVC 14.44
+      - name: Prepare ATL cache path
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -50,10 +50,24 @@ jobs:
           if (!$vsPath) { throw 'Visual Studio with MSVC 14.44 not found' }
           $toolset = Get-ChildItem "$vsPath\VC\Tools\MSVC" -Directory | Where-Object Name -Like '14.44.*' | Sort-Object Name -Descending | Select-Object -First 1
           if (!$toolset) { throw 'MSVC 14.44 directory not found' }
-          $atl = Join-Path $toolset.FullName 'atlmfc\include'
-          if (!(Test-Path (Join-Path $atl 'atlbase.h'))) {
+          "VS_INSTALL_PATH=$vsPath" >> $env:GITHUB_ENV
+          "ATL_PATH=$(Join-Path $toolset.FullName 'atlmfc')" >> $env:GITHUB_ENV
+          "ATL_CACHE_KEY=windows-atl-msvc144-$($toolset.Name)" >> $env:GITHUB_ENV
+
+      - name: Restore ATL
+        id: atl_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ env.ATL_PATH }}
+          key: ${{ env.ATL_CACHE_KEY }}
+
+      - name: Install ATL for MSVC 14.44
+        shell: pwsh
+        run: |
+          $atl = Join-Path $env:ATL_PATH 'include'
+          if (!(Test-Path (Join-Path $atl 'atlbase.h')) -or !(Test-Path (Join-Path $atl 'atlcomcli.h'))) {
             $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
-            $arguments = @('modify', '--installPath', ('"{0}"' -f $vsPath), '--add', 'Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL', '--quiet', '--norestart', '--nocache')
+            $arguments = @('modify', '--installPath', ('"{0}"' -f $env:VS_INSTALL_PATH), '--add', 'Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL', '--quiet', '--norestart', '--nocache')
             $installation = Start-Process -FilePath $installer -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
             if ($installation.ExitCode -notin @(0, 3010)) { throw "ATL installation failed: $($installation.ExitCode)" }
           }
@@ -61,6 +75,13 @@ jobs:
             if (!(Test-Path (Join-Path $atl $header))) { throw "ATL header missing: $atl\$header" }
           }
           Write-Host "ATL verified: $atl"
+
+      - name: Save ATL
+        if: steps.atl_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ env.ATL_PATH }}
+          key: ${{ env.ATL_CACHE_KEY }}
 
       - name: MSVC environment
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756

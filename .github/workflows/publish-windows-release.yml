@@ -23,6 +23,10 @@ concurrency:
 jobs:
   publish:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      published: ${{ steps.release.outputs.published }}
+      build_sha: ${{ steps.release.outputs.build_sha }}
+      tag: ${{ steps.release.outputs.tag }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -48,6 +52,7 @@ jobs:
           (cd release && sha256sum Telegram.exe > SHA256SUMS.txt)
 
       - name: Publish release
+        id: release
         shell: bash
         run: |
           tag="windows-build-$RUN_ID"
@@ -59,3 +64,44 @@ jobs:
           gh release create "$tag" release/Telegram.exe release/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$BUILD_SHA" \
             --title "$(cat title.txt)" --notes-file notes.md --latest
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "build_sha=$BUILD_SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  telegram:
+    needs: publish
+    if: needs.publish.outputs.published == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Check Telegram configuration
+        id: config
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [[ -n "$TG_TOKEN" && -n "$TG_CHAT_ID" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo 'Telegram announcement skipped: secrets are not configured.'
+          fi
+
+      - name: Checkout release history
+        if: steps.config.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Announce release in Telegram
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BUILD_SHA: ${{ needs.publish.outputs.build_sha }}
+          RELEASE_TAG: ${{ needs.publish.outputs.tag }}
+        run: python3 .github/scripts/telegram_release.py
