@@ -909,6 +909,25 @@ int main(int argc, char *argv[]) {
 			"platform keys map to targets");
 	}
 
+	{
+		const auto stableBuild = BuildSignedEnvelope(
+			Channel::Stable,
+			MakeUpdateVersion(5000000, 42),
+			manifestJson,
+			manifestSig,
+			{ &rl, &rc },
+			payload);
+		Check(verify(stableBuild, Channel::Stable, false,
+				MakeUpdateVersion(5000000, 41)).has_value(),
+			"stable rebuild with newer counter accepted");
+		Check(!verify(stableBuild, Channel::Stable, false,
+				MakeUpdateVersion(5000000, 42)),
+			"same stable build rejected");
+		Check(!verify(stableBuild, Channel::Stable, false,
+				MakeUpdateVersion(5000000, 43)),
+			"older stable build rejected");
+	}
+
 	{ // Dormancy rescue also works for beta packages on canary-public.
 		const auto beta = BuildSignedEnvelope(
 			Channel::Beta,

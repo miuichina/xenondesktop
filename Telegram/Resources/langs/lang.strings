@@ -9216,3 +9216,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_xenon_save_history_about" = "Keep deleted messages and previous text versions of edited incoming messages. View deleted messages from the chat menu, or choose Edit History from a message menu. Text and captions are saved locally; media without text is only kept until the chat is unloaded.";
 "lng_xenon_edit_history" = "Edit History";
 "lng_xenon_default_deleted_mark" = "Trash icon";
+
+"lng_xenon_updates" = "Updates";
+"lng_xenon_check_updates_automatically" = "Automatically check for updates";
+"lng_xenon_install_updates_automatically" = "Automatically install updates";
+"lng_xenon_install_updates_about" = "Download updates in the background and install them when Xenon restarts. Otherwise, choose Update to download and install a new release.";
+"lng_xenon_update_title" = "Xenon update";
+"lng_xenon_update_action" = "Update";
+"lng_xenon_update_skip" = "Skip";
+"lng_xenon_update_checking" = "Checking for updates…";
+"lng_xenon_update_latest" = "Xenon is up to date";
+"lng_xenon_update_available" = "A new release is available";
+"lng_xenon_update_downloading" = "Downloading update: {percent}%";
+"lng_xenon_update_ready" = "Ready to install. Update will restart Xenon.";
+"lng_xenon_update_skipped" = "This release was skipped";
+"lng_xenon_update_failed" = "Could not check or install the update. Please try again.";

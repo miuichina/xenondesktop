@@ -40,6 +40,8 @@ public:
 	void start(bool forceWait = false);
 	void stop();
 	void test();
+	void download(const QString &url, quint64 expectedVersion);
+	void discard();
 
 	void setMtproto(base::weak_ptr<Main::Session> session);
 

@@ -34,6 +34,13 @@ jobs:
           path: TBuild/tdesktop
           persist-credentials: false
 
+      - name: Check update signing configuration
+        shell: pwsh
+        env:
+          XENON_UPDATE_SIGNING_KEY: ${{ secrets.XENON_UPDATE_SIGNING_KEY }}
+        run: |
+          if (!$env:XENON_UPDATE_SIGNING_KEY) { throw 'Missing XENON_UPDATE_SIGNING_KEY repository secret' }
+
       - name: Prepare directories
         shell: pwsh
         run: |
@@ -163,7 +170,7 @@ jobs:
         run: |
           if (!$env:TDESKTOP_API_ID -or !$env:TDESKTOP_API_HASH) { throw 'Missing TDESKTOP_API_ID or TDESKTOP_API_HASH repository secrets' }
           Set-Location "$env:SOURCE_ROOT\Telegram"
-          & .\configure.bat qt6 -G 'Ninja Multi-Config' -D CMAKE_CONFIGURATION_TYPES=Release -D CMAKE_BUILD_TYPE=Release -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT:STRING= -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF -D "TDESKTOP_API_ID=$env:TDESKTOP_API_ID" -D "TDESKTOP_API_HASH=$env:TDESKTOP_API_HASH" 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\configure.log"
+          & .\configure.bat qt6 -G 'Ninja Multi-Config' -D CMAKE_CONFIGURATION_TYPES=Release -D CMAKE_BUILD_TYPE=Release -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT:STRING= -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF -D TDESKTOP_BUILD_PACKER=ON -D "XENON_BUILD_NUMBER=${{ github.run_number }}" -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF -D "TDESKTOP_API_ID=$env:TDESKTOP_API_ID" -D "TDESKTOP_API_HASH=$env:TDESKTOP_API_HASH" 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\configure.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Release
@@ -187,18 +194,23 @@ jobs:
           path: ${{ env.SOURCE_ROOT }}\out
           key: ${{ steps.telegram_cache.outputs.cache-primary-key }}
 
-      - name: Package executables
+      - name: Package and sign update
         shell: pwsh
+        env:
+          XENON_UPDATE_SIGNING_KEY: ${{ secrets.XENON_UPDATE_SIGNING_KEY }}
         run: |
-          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\artifact" | Out-Null
-          Copy-Item -LiteralPath "$env:SOURCE_ROOT\out\Release\Telegram.exe" -Destination "$env:GITHUB_WORKSPACE\artifact"
-          Get-FileHash "$env:GITHUB_WORKSPACE\artifact\*.exe" | Format-Table -AutoSize
+          python "$env:SOURCE_ROOT\.github\scripts\xenon_updates.py" package --source "$env:SOURCE_ROOT" --output "$env:GITHUB_WORKSPACE\artifact" --build-number '${{ github.run_number }}' --run-id '${{ github.run_id }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows EXE
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: Xenon-Windows-x64-Release
-          path: artifact/*.exe
+          path: |
+            artifact/Telegram.exe
+            artifact/Updater.exe
+            artifact/td-update-*
+            artifact/xenon-update.json
           if-no-files-found: error
           retention-days: 14
 

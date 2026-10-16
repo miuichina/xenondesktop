@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_unpack.h"
 #include "core/update_verify.h"
 #include "core/version.h"
+#include "core/xenon_updates.h"
 #include "data/data_channel.h"
 #include "data/data_session.h"
 #include "mainwindow.h"
@@ -461,7 +462,8 @@ enum class ManifestAdoption {
 [[nodiscard]] bool UnpackUpdateV2(
 		const QString &filepath,
 		const QByteArray &content,
-		ManifestAdoption adoption) {
+		ManifestAdoption adoption,
+		quint64 expectedVersion = 0) {
 	// The expected target follows the feed key, not the build: an x64
 	// build under Rosetta asks for armac and must accept that package.
 	const auto target = Updates::TargetFromPlatformKey(
@@ -487,6 +489,10 @@ enum class ManifestAdoption {
 		&error);
 	if (!verified) {
 		LOG(("Update Error: v2 update rejected: %1").arg(error));
+		return false;
+	}
+	if (expectedVersion && verified->envelope.version != expectedVersion) {
+		LOG(("Update Error: Package version does not match the release."));
 		return false;
 	}
 	if (verified->adoptManifest) {
@@ -534,7 +540,9 @@ enum class ManifestAdoption {
 			tempDir,
 			tempDirPath,
 			Updates::UpdateVersionBase(verified->envelope.version),
-			canary ? verified->envelope.version : 0)) {
+			(canary || Updates::UpdateVersionCounter(verified->envelope.version))
+				? verified->envelope.version
+				: 0)) {
 		return false;
 	}
 
@@ -548,7 +556,7 @@ enum class ManifestAdoption {
 
 #endif // !TDESKTOP_DISABLE_AUTOUPDATE
 
-bool UnpackUpdate(const QString &filepath) {
+bool UnpackUpdate(const QString &filepath, quint64 expectedVersion = 0) {
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
 	if (filepath.isEmpty()) {
 		return true;
@@ -598,7 +606,7 @@ bool UnpackUpdate(const QString &filepath) {
 		LOG(("Update Error: unsupported update format (missing v2 magic)."));
 		return false;
 	}
-	return UnpackUpdateV2(filepath, compressed, ManifestAdoption::Queued);
+	return UnpackUpdateV2(filepath, compressed, ManifestAdoption::Queued, expectedVersion);
 #else // !TDESKTOP_DISABLE_AUTOUPDATE
 	return false;
 #endif // TDESKTOP_DISABLE_AUTOUPDATE
@@ -1518,6 +1526,8 @@ public:
 	void start(bool forceWait);
 	void stop();
 	void test();
+	void download(const QString &url, quint64 expectedVersion);
+	void discard();
 
 	State state() const;
 	int already() const;
@@ -1557,6 +1567,7 @@ private:
 	void scheduleNext();
 
 	bool _testing = false;
+	quint64 _expectedVersion = 0;
 	Action _action = Action::Waiting;
 	base::Timer _timer;
 	base::Timer _retryTimer;
@@ -1691,6 +1702,10 @@ void Updater::stop() {
 }
 
 void Updater::start(bool forceWait) {
+	if (XenonUpdates::Supported()) {
+		XenonUpdates::Start(forceWait);
+		return;
+	}
 	if (cExeName().isEmpty()) {
 		return;
 	}
@@ -1809,6 +1824,26 @@ void Updater::test() {
 	start(false);
 }
 
+void Updater::download(const QString &url, quint64 expectedVersion) {
+	if (_action == Action::Loading || _action == Action::Unpacking) {
+		return;
+	}
+	stop();
+	_timer.cancel();
+	_retryTimer.cancel();
+	_expectedVersion = expectedVersion;
+	_httpImplementation.loader = std::make_shared<HttpLoader>(url);
+	tryLoaders();
+}
+
+void Updater::discard() {
+	if (_action == Action::Loading || _action == Action::Unpacking) {
+		return;
+	}
+	stop();
+	ClearAll();
+}
+
 void Updater::setMtproto(base::weak_ptr<Main::Session> session) {
 	_session = session;
 }
@@ -1891,8 +1926,9 @@ void Updater::finalize(QString filepath) {
 	_retryTimer.cancel();
 	_activeLoader = nullptr;
 	_action = Action::Unpacking;
+	const auto expectedVersion = _expectedVersion;
 	crl::async([=] {
-		const auto ready = UnpackUpdate(filepath);
+		const auto ready = UnpackUpdate(filepath, expectedVersion);
 		crl::on_main([=] {
 			GetUpdaterInstance()->unpackDone(ready);
 		});
@@ -1948,6 +1984,14 @@ void UpdateChecker::start(bool forceWait) {
 
 void UpdateChecker::test() {
 	_updater->test();
+}
+
+void UpdateChecker::download(const QString &url, quint64 expectedVersion) {
+	_updater->download(url, expectedVersion);
+}
+
+void UpdateChecker::discard() {
+	_updater->discard();
 }
 
 void UpdateChecker::setMtproto(base::weak_ptr<Main::Session> session) {
@@ -2081,7 +2125,8 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
-			if (!BuildIsCanary || canaryVersion <= RunningUpdateVersion()) {
+			if ((!BuildIsCanary && !XenonUpdates::Supported())
+				|| canaryVersion <= RunningUpdateVersion()) {
 				LOG(("Update Error: cant install canary version %1 having version %2").arg(canaryVersion).arg(RunningUpdateVersion()));
 				ClearAll();
 				return false;
@@ -2175,6 +2220,10 @@ bool checkReadyUpdate() {
 }
 
 void UpdateApplication() {
+	if (XenonUpdates::Supported()) {
+		XenonUpdates::CheckNow();
+		return;
+	}
 	if (UpdaterDisabled()) {
 		const auto url = [&] {
 #ifdef OS_WIN_STORE

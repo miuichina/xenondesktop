@@ -10,3 +10,5 @@ Telegram/Resources/zxcvbn/*.txt text eol=lf
 
 # Ensure lottie animations are treated as binary files
 *.lottie binary
+Telegram/Resources/xenon-update/manifest.* -text
+Telegram/Resources/xenon-update/*.sig binary

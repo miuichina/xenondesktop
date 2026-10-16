@@ -1,0 +1,9 @@
+#pragma once
+
+namespace Core::XenonUpdates {
+
+inline constexpr auto CommitHash = "@XENON_COMMIT_HASH@";
+inline constexpr auto CommitTime = qint64(@XENON_COMMIT_TIME@);
+inline constexpr auto BuildNumber = quint32(@XENON_BUILD_NUMBER@);
+
+} // namespace Core::XenonUpdates

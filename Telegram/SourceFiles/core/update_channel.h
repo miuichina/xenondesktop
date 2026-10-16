@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "core/update_verify.h"
 #include "core/version.h"
+#include "xenon_build.h"
 
 #include <QtCore/QString>
 
@@ -68,7 +69,7 @@ inline constexpr auto CanaryMetadataMessageId
 [[nodiscard]] inline constexpr quint64 RunningUpdateVersion() {
 	return Updates::MakeUpdateVersion(
 		quint32(AppVersion),
-		CanaryBuildCounter);
+		XenonUpdates::BuildNumber ? XenonUpdates::BuildNumber : CanaryBuildCounter);
 }
 
 [[nodiscard]] inline QString CanaryVersionSuffix() {

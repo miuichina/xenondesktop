@@ -53,6 +53,7 @@ set_source_files_properties(${src_loc}/ayu/libs/sqlite/sqlite3.c PROPERTIES
 target_include_directories(Telegram PRIVATE ${src_loc}/ayu/libs/sqlite)
 
 include(cmake/telegram_options.cmake)
+include(cmake/xenon_build.cmake)
 include(cmake/lib_ffmpeg.cmake)
 include(cmake/lib_stripe.cmake)
 include(cmake/lib_tgcalls.cmake)
@@ -84,7 +85,11 @@ if (WIN32)
 endif()
 
 include(cmake/generate_update_keys.cmake)
-generate_update_keys(Telegram ${res_loc}/update)
+if (WIN32 AND NOT DESKTOP_APP_DISABLE_AUTOUPDATE)
+    generate_update_keys(Telegram ${res_loc}/xenon-update)
+else()
+    generate_update_keys(Telegram ${res_loc}/update)
+endif()
 
 if (DESKTOP_APP_TEST_APPS OR TDESKTOP_BUILD_UPDATE_TESTS)
     include(cmake/test_update_verify.cmake)
@@ -640,6 +645,8 @@ PRIVATE
     core/update_channel.h
     core/update_checker.cpp
     core/update_checker.h
+    core/xenon_updates.cpp
+    core/xenon_updates.h
     core/update_keys.cpp
     core/update_keys.h
     core/update_unpack.cpp
@@ -2775,7 +2782,7 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
         )
     endif()
 
-    if (DESKTOP_APP_SPECIAL_TARGET)
+    if (DESKTOP_APP_SPECIAL_TARGET OR TDESKTOP_BUILD_PACKER)
         add_executable(Packer)
         init_target(Packer)
 
@@ -2790,6 +2797,9 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
         )
 
         target_include_directories(Packer PRIVATE ${src_loc})
+        if (TDESKTOP_BUILD_PACKER OR NOT DESKTOP_APP_SPECIAL_TARGET)
+            target_compile_definitions(Packer PRIVATE PACKER_DISABLE_PRIVATE)
+        endif()
 
         target_link_libraries(Packer
         PRIVATE

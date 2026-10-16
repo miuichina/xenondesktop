@@ -431,25 +431,15 @@ void BlurBackdropCache::paint(
 		const auto textureSize = QSize(
 			std::max(int(std::ceil(bounds.width() * scale)), 1),
 			std::max(int(std::ceil(bounds.height() * scale)), 1));
-		const auto ratio = scale * BlurTextureDownscale();
-		image = QImage(
-			QSize(
-				std::max(int(std::ceil(bounds.width() * ratio)), 1),
-				std::max(int(std::ceil(bounds.height() * ratio)), 1)),
-			QImage::Format_ARGB32_Premultiplied);
-		image.setDevicePixelRatio(ratio);
+		image = QImage(textureSize, QImage::Format_ARGB32_Premultiplied);
 		image.fill(Qt::transparent);
 		{
 			Painter cached(&image);
+			cached.scale(scale, scale);
 			cached.translate(-bounds.topLeft());
 			cached.setClipRect(bounds);
 			render(cached, bounds);
 		}
-		image = image.scaled(
-			textureSize,
-			Qt::IgnoreAspectRatio,
-			Qt::SmoothTransformation);
-		image.setDevicePixelRatio(1.);
 		if (_revision == revision) {
 			_scale = scale;
 			_area = bounds;
@@ -482,8 +472,8 @@ void UpdateBlurForeground(
 
 float64 BlurTextureDownscale() {
 	const auto intensity = (std::clamp(
-		base::options::value<int>(kOptionBlurIntensity), 1, 100) - 1) / 99.;
-	return 1. + 3. * intensity * intensity;
+		base::options::value<int>(kOptionBlurIntensity), 1, 200) - 1) / 199.;
+	return 2. + 6. * intensity;
 }
 
 QImage PrepareBlurImage(const QImage &source, QSize size, bool fullResolution) {

@@ -17,7 +17,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: windows-release-${{ github.event.workflow_run.id || inputs.run_id }}
+  group: windows-release-publish
   cancel-in-progress: false
 
 jobs:
@@ -33,6 +33,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
     steps:
+      - name: Checkout release tooling and history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: dev
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Verify the successful build and download its EXE
         shell: bash
         run: |
@@ -46,13 +53,45 @@ jobs:
           ' build.json > /dev/null
           sha=$(jq -r '.head_sha' build.json)
           echo "BUILD_SHA=$sha" >> "$GITHUB_ENV"
+          if gh release view "windows-build-$RUN_ID" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo 'This build already has a release.'
+            echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
+            exit 0
+          fi
           gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.commit.message | split("\n")[0]' > title.txt
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name Xenon-Windows-x64-Release --dir release
           test -s release/Telegram.exe
-          (cd release && sha256sum Telegram.exe > SHA256SUMS.txt)
+          test -s release/Updater.exe
+          jq -e --arg sha "$sha" --arg tag "windows-build-$RUN_ID" --argjson number "$(jq '.run_number' build.json)" '
+            .format == 1 and .commit == $sha and .tag == $tag and .build_number == $number
+          ' release/xenon-update.json > /dev/null
+          package=$(jq -r '.package' release/xenon-update.json)
+          [[ "$package" =~ ^td-update-win-x64-[0-9]+$ ]] || exit 1
+          test -s "release/$package"
+          (cd release && sha256sum Telegram.exe Updater.exe td-update-* xenon-update.json > SHA256SUMS.txt)
+
+      - name: Prepare release history
+        if: env.SKIP_PUBLISH != 'true'
+        shell: bash
+        run: |
+          previous_tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq '.tagName' 2>/dev/null || true)
+          previous_sha=''
+          if [[ -n "$previous_tag" ]]; then
+            previous_sha=$(git rev-parse --verify "refs/tags/$previous_tag^{commit}")
+            if gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" --pattern xenon-update.json --dir previous 2>/dev/null; then
+              if ! jq -e --argjson current "$(jq '.build_number' release/xenon-update.json)" '.build_number < $current' previous/xenon-update.json > /dev/null; then
+                echo 'A newer build has already been published.'
+                echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
+                exit 0
+              fi
+            fi
+          fi
+          python .github/scripts/xenon_updates.py release-notes --source . --metadata release/xenon-update.json --previous "$previous_sha" --output notes.md
+          printf '\n\n[Build and logs](https://github.com/%s/actions/runs/%s)\n' "$GITHUB_REPOSITORY" "$RUN_ID" >> notes.md
 
       - name: Publish release
         id: release
+        if: env.SKIP_PUBLISH != 'true'
         shell: bash
         run: |
           tag="windows-build-$RUN_ID"
@@ -60,8 +99,7 @@ jobs:
             echo 'This build already has a release.'
             exit 0
           fi
-          printf 'Windows x64 Release\n\nCommit: `%s`\n\n[Build and logs](https://github.com/%s/actions/runs/%s)\n' "$BUILD_SHA" "$GITHUB_REPOSITORY" "$RUN_ID" > notes.md
-          gh release create "$tag" release/Telegram.exe release/SHA256SUMS.txt \
+          gh release create "$tag" release/Telegram.exe release/Updater.exe release/td-update-* release/xenon-update.json release/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$BUILD_SHA" \
             --title "$(cat title.txt)" --notes-file notes.md --latest
           echo "published=true" >> "$GITHUB_OUTPUT"

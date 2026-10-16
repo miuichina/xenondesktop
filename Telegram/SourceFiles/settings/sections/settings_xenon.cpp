@@ -7,6 +7,7 @@
 #include "chat_helpers/compose/compose_show.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/xenon_updates.h"
 #include "data/components/sponsored_messages.h"
 #include "data/data_document.h"
 #include "dialogs/dialogs_entry.h"
@@ -53,6 +54,43 @@ const auto kMeta = BuildHelper({
 	.title = &tr::lng_settings_xenon,
 	.icon = &st::menuIconStar,
 }, [](SectionBuilder &builder) {
+	if (Core::XenonUpdates::Supported()) {
+		builder.addSubsectionTitle({
+			.id = u"xenon/updates"_q,
+			.title = tr::lng_xenon_updates(),
+		});
+		const auto check = builder.addButton({
+			.id = u"xenon/check_updates_automatically"_q,
+			.title = tr::lng_xenon_check_updates_automatically(),
+			.toggled = rpl::single(Core::XenonUpdates::AutomaticallyCheck()),
+			.keywords = { u"update"_q, u"automatic"_q },
+		});
+		if (check) {
+			check->toggledChanges() | rpl::on_next([](bool checked) {
+				Core::XenonUpdates::SetAutomaticallyCheck(checked);
+			}, check->lifetime());
+		}
+		const auto install = builder.addButton({
+			.id = u"xenon/install_updates_automatically"_q,
+			.title = tr::lng_xenon_install_updates_automatically(),
+			.toggled = rpl::single(Core::XenonUpdates::AutomaticallyInstall()),
+			.keywords = { u"update"_q, u"automatic"_q, u"install"_q },
+		});
+		if (install) {
+			install->toggledChanges() | rpl::on_next([](bool checked) {
+				Core::XenonUpdates::SetAutomaticallyInstall(checked);
+			}, install->lifetime());
+		}
+		builder.addDividerText(tr::lng_xenon_install_updates_about());
+		builder.addButton({
+			.id = u"xenon/check_updates_now"_q,
+			.title = tr::lng_settings_check_now(),
+			.label = Core::XenonUpdates::Status(),
+			.onClick = [] { Core::XenonUpdates::CheckNow(); },
+			.keywords = { u"update"_q, u"check"_q, u"version"_q },
+		});
+		builder.addDividerText(rpl::single(Core::XenonUpdates::BuildDescription()));
+	}
 	const auto addArchiveToggle = [&](QString id,
 			rpl::producer<QString> title,
 			std::string key,

@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/launcher.h"
 #include "core/update_channel.h"
 #include "core/update_checker.h"
+#include "core/xenon_updates.h"
 #include "data/data_auto_download.h"
 #include "data/data_session.h"
 #include "export/export_manager.h"
@@ -1417,7 +1418,7 @@ void SetupConnectionType(
 }
 
 bool HasUpdate() {
-	return !Core::UpdaterDisabled();
+	return !Core::UpdaterDisabled() && !Core::XenonUpdates::Supported();
 }
 
 void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
