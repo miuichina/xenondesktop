@@ -190,10 +190,10 @@ namespace {
 			pen.setCapStyle(Qt::RoundCap);
 			p.setOpacity(radial.shown * (1. - shown));
 			p.setPen(pen);
-			p.drawArc(
+			Ui::DrawRadial(
+				p,
 				rect.marginsAdded({ line, line, line, line }),
-				radial.arcFrom,
-				radial.arcLength);
+				radial);
 			p.setOpacity(1.);
 		}
 	}, result->lifetime());

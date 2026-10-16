@@ -1191,6 +1191,9 @@ void PaintLoadingAnimation(
 		.shown = radial.shown * loadingShown,
 		.arcFrom = radial.arcFrom,
 		.arcLength = radial.arcLength,
+		.material = radial.material,
+		.progress = radial.progress,
+		.waveAmplitude = radial.waveAmplitude,
 	};
 
 	auto pen = QPen(st::white->c);

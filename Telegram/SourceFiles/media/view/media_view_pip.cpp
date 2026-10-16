@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_view_pip.h"
 
+#include "history/view/media/history_view_media_common.h"
+
 #include "media/streaming/media_streaming_player.h"
 #include "media/streaming/media_streaming_document.h"
 #include "media/streaming/media_streaming_utility.h"
@@ -1839,11 +1841,8 @@ void Pip::paintRadialLoadingContent(
 		QPainter &p,
 		const QRect &inner,
 		QColor fg) const {
-	const auto arc = inner.marginsRemoved(QMargins(
-		st::radialLine,
-		st::radialLine,
-		st::radialLine,
-		st::radialLine));
+	const auto arc = inner.marginsRemoved(
+		HistoryView::MediaRadialMargins(st::radialLine));
 	p.setOpacity(_instance->waitingOpacity());
 	p.setPen(Qt::NoPen);
 	p.setBrush(st::radialBg);

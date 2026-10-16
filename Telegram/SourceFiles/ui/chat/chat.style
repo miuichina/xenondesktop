@@ -427,6 +427,7 @@ msgFileTopMinus: 6px;
 
 msgFileOverDuration: 200;
 msgFileRadialLine: 3px;
+msgFileMd3RadialInset: 2px;
 
 msgWaveformBar: 2px;
 msgWaveformSkip: 1px;

@@ -19,3 +19,8 @@ to link the code of portions of this program with the OpenSSL library.
 More information about the Telegram project: https://telegram.org
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
+
+The Material 3 circular progress motion is adapted from AndroidX,
+Copyright 2022 The Android Open Source Project, under the Apache License 2.0.
+Source references and adaptation details: docs/md3-loading-indicators.md
+License: https://www.apache.org/licenses/LICENSE-2.0

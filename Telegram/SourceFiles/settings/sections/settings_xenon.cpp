@@ -12,6 +12,7 @@
 #include "dialogs/dialogs_entry.h"
 #include "history/view/history_view_top_bar_blur.h"
 #include "history/view/history_view_top_bar_widget.h"
+#include "history/view/history_view_bottom_info.h"
 #include "lang/lang_keys.h"
 #include "settings/sections/settings_main.h"
 #include "settings/settings_builder.h"
@@ -143,6 +144,22 @@ const auto kMeta = BuildHelper({
 		}, fps->lifetime());
 	}
 	builder.addDividerText(tr::lng_settings_xenon_show_fps_about());
+
+	auto &messageTimeSeconds = base::options::lookup<bool>(
+		HistoryView::kOptionMessageTimeSeconds);
+	const auto seconds = builder.addButton({
+		.id = u"xenon/message_time_seconds"_q,
+		.title = rpl::single(u"Show seconds in message time"_q),
+		.toggled = rpl::single(messageTimeSeconds.value()),
+		.keywords = { u"time"_q, u"seconds"_q, u"timestamp"_q },
+	});
+	if (seconds) {
+		seconds->toggledChanges() | rpl::on_next([
+			option = &messageTimeSeconds
+		](bool checked) {
+			option->set(checked);
+		}, seconds->lifetime());
+	}
 
 	auto &blurEffects = base::options::lookup<bool>(
 		HistoryView::kOptionBlurEffects);
@@ -287,6 +304,38 @@ const auto kMeta = BuildHelper({
 		](bool checked) {
 			option->set(checked);
 		}, smooth->lifetime());
+	}
+	builder.addDivider();
+	auto &md3Loading = base::options::lookup<bool>(
+		"xenon-md3-loading-indicators");
+	const auto md3 = builder.addButton({
+		.id = u"xenon/md3_loading_indicators"_q,
+		.title = rpl::single(u"MD3 loading indicators"_q),
+		.toggled = rpl::single(md3Loading.value()),
+		.keywords = { u"material"_q, u"md3"_q, u"loading"_q },
+	});
+	if (md3) {
+		md3->toggledChanges() | rpl::on_next([
+			option = &md3Loading
+		](bool checked) {
+			option->set(checked);
+		}, md3->lifetime());
+	}
+	auto &md3Waves = base::options::lookup<bool>(
+		"xenon-md3-loading-waves");
+	const auto waves = builder.addButton({
+		.id = u"xenon/md3_loading_waves"_q,
+		.title = rpl::single(u"MD3 loading indicator waves"_q),
+		.toggled = rpl::single(md3Waves.value()),
+		.keywords = { u"material"_q, u"wave"_q, u"loading"_q },
+		.shown = md3 ? md3->toggledValue() : rpl::producer<bool>(nullptr),
+	});
+	if (waves) {
+		waves->toggledChanges() | rpl::on_next([
+			option = &md3Waves
+		](bool checked) {
+			option->set(checked);
+		}, waves->lifetime());
 	}
 	builder.addDivider();
 

@@ -540,7 +540,8 @@ void Photo::draw(Painter &p, const PaintContext &context) const {
 		}
 		p.setOpacity(1);
 		if (radial) {
-			QRect rinner(inner.marginsRemoved(QMargins(st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine)));
+			const auto rinner = inner.marginsRemoved(
+				MediaRadialMargins(st::msgFileRadialLine));
 			_animation->radial.draw(p, rinner, st::msgFileRadialLine, sti->historyFileThumbRadialFg);
 		} else if (ttlCovered && !_data->loading()) {
 			paintTtlCountdown(
@@ -1032,7 +1033,7 @@ void Photo::drawGrouped(
 		p.setOpacity(1);
 		if (radial) {
 			const auto line = st::historyGroupRadialLine;
-			const auto rinner = inner.marginsRemoved({ line, line, line, line });
+			const auto rinner = inner.marginsRemoved(MediaRadialMargins(line));
 			_animation->radial.draw(p, rinner, line, sti->historyFileThumbRadialFg);
 		} else if (ttlIdle) {
 			paintTtlCountdown(

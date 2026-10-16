@@ -985,7 +985,7 @@ void ProxyRow::paintCheck(Painter &p) {
 			pen.color(),
 			_st->bg);
 	} else if (loading.arcLength < arc::kFullLength) {
-		p.drawArc(rect, loading.arcFrom, loading.arcLength);
+		Ui::DrawRadial(p, rect, loading);
 	} else {
 		p.drawEllipse(rect);
 	}

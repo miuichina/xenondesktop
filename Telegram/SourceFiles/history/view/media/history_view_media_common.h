@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/runtime_composer.h"
 #include "ui/controls/ttl_media.h"
 
+#include <QtCore/QMargins>
+
 class DocumentData;
 class PhotoData;
 class Image;
@@ -39,6 +41,8 @@ struct ChatPaintContext;
 namespace HistoryView {
 
 class Media;
+
+[[nodiscard]] QMargins MediaRadialMargins(int line);
 
 void PaintInterpolatedIcon(
 	QPainter &p,

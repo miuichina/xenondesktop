@@ -1311,10 +1311,10 @@ void MessagesUi::setupMessagesWidget() {
 						? 0.
 						: entry.sentAnimation.value(1.);
 					p.setOpacity(state.shown * (1. - sent));
-					p.drawArc(
+					Ui::DrawRadial(
+						p,
 						rect.marginsRemoved({ shift, shift, shift, shift }),
-						state.arcFrom,
-						state.arcLength);
+						state);
 					p.setOpacity(1.);
 				}
 			}

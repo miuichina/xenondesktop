@@ -24,6 +24,8 @@ class Reactions;
 
 namespace HistoryView {
 
+inline constexpr auto kOptionMessageTimeSeconds = "xenon-message-time-seconds";
+
 using PaintContext = Ui::ChatPaintContext;
 
 class Message;

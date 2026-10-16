@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_bottom_info.h"
 
 #include "ayu/deleted_messages.h"
+#include "base/options.h"
 
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style.h"
@@ -40,6 +41,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace HistoryView {
 namespace {
+
+base::options::toggle OptionMessageTimeSeconds({
+	.id = kOptionMessageTimeSeconds,
+	.name = "Show seconds in message time",
+});
 
 [[nodiscard]] QString SchedulePeriodText(TimeId period) {
 	struct Entry {
@@ -507,7 +513,11 @@ void BottomInfo::layoutDateText() {
 		: edited + ((_data.flags
 			& (Data::Flag::ForwardedDate | Data::Flag::FullDate))
 		? Ui::FormatDateTimeSavedFrom(_data.date)
-		: QLocale().toString(_data.date.time(), QLocale::ShortFormat));
+		: QLocale().toString(
+			_data.date.time(),
+			base::options::value<bool>(kOptionMessageTimeSeconds)
+				? QLocale::LongFormat
+				: QLocale::ShortFormat));
 	const auto afterAuthor = prefix + date;
 	const auto afterAuthorWidth = st::msgDateFont->width(afterAuthor);
 	const auto authorWidth = st::msgDateFont->width(author);

@@ -888,7 +888,8 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 		}
 		p.setOpacity(radialRevealed);
 		if (radial) {
-			QRect rinner(inner.marginsRemoved(QMargins(st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine)));
+			const auto rinner = inner.marginsRemoved(
+				MediaRadialMargins(st::msgFileRadialLine));
 			if (streamedForWaiting && !_data->uploading()) {
 				Ui::InfiniteRadialAnimation::Draw(
 					p,
@@ -1971,7 +1972,7 @@ void Gif::drawGrouped(
 		p.setOpacity(radialRevealed);
 		if (radial) {
 			const auto line = st::historyGroupRadialLine;
-			const auto rinner = inner.marginsRemoved({ line, line, line, line });
+			const auto rinner = inner.marginsRemoved(MediaRadialMargins(line));
 			if (streamedForWaiting && !_data->uploading()) {
 				Ui::InfiniteRadialAnimation::Draw(
 					p,

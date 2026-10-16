@@ -396,7 +396,7 @@ void PeerShortInfoCover::paintRadial(QPainter &p) {
 		pen.setWidth(line);
 		pen.setCapStyle(Qt::RoundCap);
 		p.setPen(pen);
-		p.drawArc(arc, radialState.arcFrom, radialState.arcLength);
+		Ui::DrawRadial(p, arc, radialState);
 	}
 	if (infinite) {
 		p.setOpacity(1.);

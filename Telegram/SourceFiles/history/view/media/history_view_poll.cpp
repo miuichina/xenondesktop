@@ -4028,10 +4028,7 @@ void Poll::Options::paintRadio(
 			if (multiChoice) {
 				p.drawRoundedRect(rect, radius, radius);
 			} else {
-				p.drawArc(
-					rect,
-					state.arcFrom,
-					state.arcLength);
+				Ui::DrawRadial(p, rect, state);
 			}
 		}
 	} else {

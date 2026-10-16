@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_views.h"
 #include "apiwrap.h"
 #include "base/unixtime.h"
+#include "base/options.h"
 #include "inline_bots/bot_attach_web_view.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/cached_round_corners.h"
@@ -56,6 +57,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_settings.h"
 
 namespace HistoryView {
+
+QMargins MediaRadialMargins(int line) {
+	const auto inset = line + (base::options::value<bool>(
+		"xenon-md3-loading-indicators") ? st::msgFileMd3RadialInset : 0);
+	return QMargins(inset, inset, inset, inset);
+}
+
 namespace {
 
 constexpr auto kMediaUnlockedTooltipDuration = 5 * crl::time(1000);

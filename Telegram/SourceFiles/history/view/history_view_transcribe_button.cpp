@@ -249,7 +249,7 @@ void TranscribeButton::paint(
 		} else if (state.arcLength < arc::kFullLength) {
 			const auto opacity = p.opacity();
 			p.setOpacity(state.shown * (1. - opened));
-			p.drawArc(r, state.arcFrom, state.arcLength);
+			Ui::DrawRadial(p, r, state);
 			p.setOpacity(opacity);
 		}
 

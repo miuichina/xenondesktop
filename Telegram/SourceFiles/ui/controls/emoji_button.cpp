@@ -69,7 +69,7 @@ void EmojiButton::paintEvent(QPaintEvent *e) {
 
 		PainterHighQualityEnabler hq(p);
 		if (loadingState.arcLength < RadialState::kFull) {
-			p.drawArc(inner, loadingState.arcFrom, loadingState.arcLength);
+			Ui::DrawRadial(p, inner, loadingState);
 		} else {
 			p.drawEllipse(inner);
 		}

@@ -6531,11 +6531,8 @@ void OverlayWidget::paintRadialLoadingContent(
 		QRect inner,
 		bool radial,
 		float64 radialOpacity) const {
-	const auto arc = inner.marginsRemoved(QMargins(
-		st::radialLine,
-		st::radialLine,
-		st::radialLine,
-		st::radialLine));
+	const auto arc = inner.marginsRemoved(
+		HistoryView::MediaRadialMargins(st::radialLine));
 	const auto paintBg = [&](float64 opacity, QBrush brush) {
 		p.setOpacity(opacity);
 		p.setPen(Qt::NoPen);

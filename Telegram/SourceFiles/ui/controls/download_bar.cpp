@@ -208,7 +208,7 @@ void DownloadBar::paint(Painter &p, QRect clip) {
 			const auto m = added / 2.;
 			auto rect = QRectF(full).marginsRemoved({ m, m, m, m });
 			if (loading.arcLength < arc::kFullLength) {
-				p.drawArc(rect, loading.arcFrom, loading.arcLength);
+				Ui::DrawRadial(p, rect, loading);
 			} else {
 				p.drawEllipse(rect);
 			}

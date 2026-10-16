@@ -804,7 +804,8 @@ void Document::draw(
 			}
 			p.setOpacity(1.);
 			if (radial) {
-				QRect rinner(inner.marginsRemoved(QMargins(st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine)));
+				const auto rinner = inner.marginsRemoved(
+					MediaRadialMargins(st::msgFileRadialLine));
 				_animation->radial.draw(p, rinner, st::msgFileRadialLine, sti->historyFileThumbRadialFg);
 			}
 		}
@@ -925,7 +926,8 @@ void Document::draw(
 			}
 
 			if (radial && !cornerDownload && !mediaEditor) {
-				QRect rinner(inner.marginsRemoved(QMargins(st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine, st::msgFileRadialLine)));
+				const auto rinner = inner.marginsRemoved(
+					MediaRadialMargins(st::msgFileRadialLine));
 				_animation->radial.draw(q, rinner, st::msgFileRadialLine, stm->historyFileRadialFg);
 			}
 			if (hasTtlBadge) {
@@ -1268,7 +1270,8 @@ void Document::drawCornerDownload(
 		}
 		icon.paintInCenter(q, inner);
 		if (_animation && _animation->radial.animating()) {
-			const auto rinner = inner.marginsRemoved(QMargins(st::historyAudioRadialLine, st::historyAudioRadialLine, st::historyAudioRadialLine, st::historyAudioRadialLine));
+			const auto rinner = inner.marginsRemoved(
+				MediaRadialMargins(st::historyAudioRadialLine));
 			_animation->radial.draw(q, rinner, st::historyAudioRadialLine, stm->historyFileRadialFg);
 		}
 	};
