@@ -22,5 +22,5 @@ Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
 
 The Material 3 circular progress motion is adapted from AndroidX,
 Copyright 2022 The Android Open Source Project, under the Apache License 2.0.
-Source references and adaptation details: docs/md3-loading-indicators.md
+Source: https://android.googlesource.com/platform/frameworks/support/
 License: https://www.apache.org/licenses/LICENSE-2.0
