@@ -9218,6 +9218,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_xenon_default_deleted_mark" = "Trash icon";
 
 "lng_xenon_updates" = "Updates";
+"lng_xenon_force_update" = "Force update";
 "lng_xenon_check_updates_automatically" = "Automatically check for updates";
 "lng_xenon_install_updates_automatically" = "Automatically install updates";
 "lng_xenon_install_updates_about" = "Download updates in the background and install them when Xenon restarts. Otherwise, choose Download and install the update later from the chat list.";

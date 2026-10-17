@@ -76,6 +76,7 @@ constexpr auto kFrequentUpdateDelayRandPart = 300;
 // tdata/version marker for installed v2 canary packages, holding the full
 // 64-bit (base << 32 | counter) version. 0x7FFFFFFF is the alpha marker.
 constexpr auto kVersionFileCanaryMarker = quint32(0x7FFFFFFE);
+constexpr auto kVersionFileForceMarker = quint32(0x58464F52);
 
 #if !defined Q_OS_WIN && !defined Q_OS_MAC
 constexpr auto kFlatpakPortalService = "org.freedesktop.portal.Flatpak";
@@ -416,7 +417,8 @@ enum class ManifestAdoption {
 		QDir &tempDir,
 		const QString &tempDirPath,
 		quint32 version,
-		quint64 canaryVersion) {
+		quint64 canaryVersion,
+		bool force) {
 	// create tdata/version file
 	tempDir.mkdir(QDir(tempDirPath + u"/tdata"_q).absolutePath());
 	std::wstring versionString = FormatVersionDisplay(version).toStdWString();
@@ -439,6 +441,13 @@ enum class ManifestAdoption {
 	} else {
 		fVersion.write((const char*)&versionLen, sizeof(VersionInt));
 		fVersion.write((const char*)&versionStr[0], versionLen);
+	}
+	if (force) {
+		const auto marker = VersionInt(kVersionFileForceMarker);
+		if (fVersion.write(reinterpret_cast<const char*>(&marker), sizeof(marker))
+			!= sizeof(marker)) {
+			return false;
+		}
 	}
 	fVersion.close();
 	return true;
@@ -464,7 +473,8 @@ enum class ManifestAdoption {
 		const QString &filepath,
 		const QByteArray &content,
 		ManifestAdoption adoption,
-		quint64 expectedVersion = 0) {
+		quint64 expectedVersion = 0,
+		bool force = false) {
 	// The expected target follows the feed key, not the build: an x64
 	// build under Rosetta asks for armac and must accept that package.
 	const auto target = Updates::TargetFromPlatformKey(
@@ -487,7 +497,8 @@ enum class ManifestAdoption {
 		HeldManifest(),
 		Updates::RootPublicKeyPem(),
 		base::unixtime::now(),
-		&error);
+		&error,
+		force ? Updates::VersionCheck::AllowAny : Updates::VersionCheck::RequireNewer);
 	if (!verified) {
 		LOG(("Update Error: v2 update rejected: %1").arg(error));
 		return false;
@@ -541,9 +552,10 @@ enum class ManifestAdoption {
 			tempDir,
 			tempDirPath,
 			Updates::UpdateVersionBase(verified->envelope.version),
-			(canary || Updates::UpdateVersionCounter(verified->envelope.version))
+			(canary || force || Updates::UpdateVersionCounter(verified->envelope.version))
 				? verified->envelope.version
-				: 0)) {
+				: 0,
+			force)) {
 		return false;
 	}
 
@@ -557,7 +569,10 @@ enum class ManifestAdoption {
 
 #endif // !TDESKTOP_DISABLE_AUTOUPDATE
 
-bool UnpackUpdate(const QString &filepath, quint64 expectedVersion = 0) {
+bool UnpackUpdate(
+		const QString &filepath,
+		quint64 expectedVersion = 0,
+		bool force = false) {
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
 	if (filepath.isEmpty()) {
 		return true;
@@ -607,7 +622,12 @@ bool UnpackUpdate(const QString &filepath, quint64 expectedVersion = 0) {
 		LOG(("Update Error: unsupported update format (missing v2 magic)."));
 		return false;
 	}
-	return UnpackUpdateV2(filepath, compressed, ManifestAdoption::Queued, expectedVersion);
+	return UnpackUpdateV2(
+		filepath,
+		compressed,
+		ManifestAdoption::Queued,
+		expectedVersion,
+		force);
 #else // !TDESKTOP_DISABLE_AUTOUPDATE
 	return false;
 #endif // TDESKTOP_DISABLE_AUTOUPDATE
@@ -1527,7 +1547,8 @@ public:
 	void start(bool forceWait);
 	void stop();
 	void test();
-	void download(const QString &url, quint64 expectedVersion);
+	void download(const QString &url, quint64 expectedVersion, bool force);
+	rpl::producer<> discarded() const;
 	void discard();
 
 	State state() const;
@@ -1568,6 +1589,7 @@ private:
 	void scheduleNext();
 
 	bool _testing = false;
+	bool _forceUpdate = false;
 	quint64 _expectedVersion = 0;
 	Action _action = Action::Waiting;
 	base::Timer _timer;
@@ -1577,6 +1599,7 @@ private:
 	rpl::event_stream<Progress> _progress;
 	rpl::event_stream<> _failed;
 	rpl::event_stream<> _ready;
+	rpl::event_stream<> _discarded;
 	Implementation _httpImplementation;
 	Implementation _mtpImplementation;
 	Implementation _flatpakImplementation;
@@ -1627,6 +1650,10 @@ rpl::producer<> Updater::failed() const {
 
 rpl::producer<> Updater::ready() const {
 	return _ready.events();
+}
+
+rpl::producer<> Updater::discarded() const {
+	return _discarded.events();
 }
 
 void Updater::check() {
@@ -1695,6 +1722,7 @@ bool Updater::percent() const {
 }
 
 void Updater::stop() {
+	_forceUpdate = false;
 	_httpImplementation = Implementation();
 	_mtpImplementation = Implementation();
 	_flatpakImplementation = Implementation{
@@ -1827,7 +1855,10 @@ void Updater::test() {
 	start(false);
 }
 
-void Updater::download(const QString &url, quint64 expectedVersion) {
+void Updater::download(
+		const QString &url,
+		quint64 expectedVersion,
+		bool force) {
 	if (_action == Action::Loading || _action == Action::Unpacking) {
 		return;
 	}
@@ -1835,6 +1866,7 @@ void Updater::download(const QString &url, quint64 expectedVersion) {
 	_timer.cancel();
 	_retryTimer.cancel();
 	_expectedVersion = expectedVersion;
+	_forceUpdate = force && XenonUpdates::Supported();
 	_httpImplementation.loader = std::make_shared<HttpLoader>(url);
 	tryLoaders();
 }
@@ -1845,6 +1877,7 @@ void Updater::discard() {
 	}
 	stop();
 	ClearAll();
+	_discarded.fire({});
 }
 
 void Updater::setMtproto(base::weak_ptr<Main::Session> session) {
@@ -1932,8 +1965,9 @@ void Updater::finalize(QString filepath) {
 	_progress.fire({});
 	_retryTimer.cancel();
 	const auto expectedVersion = _expectedVersion;
+	const auto force = _forceUpdate;
 	crl::async([=] {
-		const auto ready = UnpackUpdate(filepath, expectedVersion);
+		const auto ready = UnpackUpdate(filepath, expectedVersion, force);
 		crl::on_main([=] {
 			GetUpdaterInstance()->unpackDone(ready);
 		});
@@ -1968,6 +2002,7 @@ rpl::producer<> UpdateChecker::changes() const {
 		isLatest(),
 		failed(),
 		ready(),
+		_updater->discarded(),
 		progress() | rpl::map([] { return rpl::empty; })));
 }
 
@@ -2000,8 +2035,11 @@ void UpdateChecker::test() {
 	_updater->test();
 }
 
-void UpdateChecker::download(const QString &url, quint64 expectedVersion) {
-	_updater->download(url, expectedVersion);
+void UpdateChecker::download(
+		const QString &url,
+		quint64 expectedVersion,
+		bool force) {
+	_updater->download(url, expectedVersion, force);
 }
 
 void UpdateChecker::discard() {
@@ -2161,8 +2199,14 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
+			auto marker = VersionInt();
+			const auto force = XenonUpdates::Supported()
+				&& !fVersion.atEnd()
+				&& fVersion.read(reinterpret_cast<char*>(&marker), sizeof(marker))
+					== sizeof(marker)
+				&& marker == VersionInt(kVersionFileForceMarker);
 			if ((!BuildIsCanary && !XenonUpdates::Supported())
-				|| canaryVersion <= RunningUpdateVersion()) {
+				|| (!force && canaryVersion <= RunningUpdateVersion())) {
 				LOG(("Update Error: cant install canary version %1 having version %2").arg(canaryVersion).arg(RunningUpdateVersion()));
 				ClearAll();
 				return false;

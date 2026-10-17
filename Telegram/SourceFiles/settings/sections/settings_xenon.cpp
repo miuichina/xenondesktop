@@ -89,6 +89,12 @@ const auto kMeta = BuildHelper({
 			.onClick = [] { Core::XenonUpdates::CheckNow(); },
 			.keywords = { u"update"_q, u"check"_q, u"version"_q },
 		});
+		builder.addButton({
+			.id = u"xenon/force_update"_q,
+			.title = tr::lng_xenon_force_update(),
+			.onClick = [] { Core::XenonUpdates::ForceUpdate(); },
+			.keywords = { u"update"_q, u"force"_q, u"reinstall"_q },
+		});
 		builder.addDividerText(rpl::single(Core::XenonUpdates::BuildDescription()));
 	}
 	const auto addArchiveToggle = [&](QString id,

@@ -53,7 +53,7 @@ class Service final : public QObject {
 public:
 	Service();
 	~Service() override;
-	void check(bool manual);
+	void check(bool manual, bool force = false);
 	void preferencesChanged();
 	[[nodiscard]] rpl::producer<QString> status() const;
 
@@ -76,6 +76,7 @@ private:
 	Release _release;
 	bool _busy = false;
 	bool _manual = false;
+	bool _force = false;
 	bool _downloading = false;
 	int _totalCommits = 0;
 	int _receivedCommits = 0;
@@ -138,9 +139,16 @@ void Service::preferencesChanged() {
 	}
 }
 
-void Service::check(bool manual) {
+void Service::check(bool manual, bool force) {
 	if (_busy || _downloading || Quitting()) {
 		return;
+	}
+	if (force) {
+		if (_box) {
+			_box->closeBox();
+			_box = nullptr;
+		}
+		_checker.discard();
 	} else if (_box || _checker.state() == UpdateChecker::State::Ready) {
 		finish();
 		return;
@@ -154,6 +162,7 @@ void Service::check(bool manual) {
 	}
 	_busy = true;
 	_manual = manual;
+	_force = force;
 	_release = {};
 	_totalCommits = 0;
 	_receivedCommits = 0;
@@ -243,8 +252,8 @@ void Service::metadata(const QJsonObject &release) {
 			return fail();
 		}
 		_release.version = Updates::MakeUpdateVersion(quint32(base), quint32(build));
-		if (_release.commit == QLatin1String(CommitHash)
-			|| _release.version <= RunningUpdateVersion()) {
+		if (!_force && (_release.commit == QLatin1String(CommitHash)
+			|| _release.version <= RunningUpdateVersion())) {
 			_status = tr::lng_xenon_update_latest(tr::now);
 			return finish();
 		}
@@ -264,7 +273,12 @@ void Service::metadata(const QJsonObject &release) {
 			_status = tr::lng_xenon_update_skipped(tr::now);
 			return finish();
 		}
-		compare(1);
+		if (_force) {
+			finish();
+			download();
+		} else {
+			compare(1);
+		}
 	});
 }
 
@@ -365,7 +379,7 @@ void Service::download() {
 		tr::now,
 		lt_percent,
 		QString::number(0));
-	_checker.download(_release.package, _release.version);
+	_checker.download(_release.package, _release.version, _force);
 }
 
 void Service::fail() {
@@ -419,6 +433,12 @@ void Start(bool scheduled) {
 void CheckNow() {
 	if (Supported()) {
 		Instance().check(true);
+	}
+}
+
+void ForceUpdate() {
+	if (Supported()) {
+		Instance().check(true, true);
 	}
 }
 

@@ -926,6 +926,33 @@ int main(int argc, char *argv[]) {
 		Check(!verify(stableBuild, Channel::Stable, false,
 				MakeUpdateVersion(5000000, 43)),
 			"older stable build rejected");
+		const auto force = [&](const QByteArray &bytes, Target target, Channel channel) {
+			return VerifyUpdate(
+				bytes,
+				channel,
+				false,
+				target,
+				MakeUpdateVersion(5000000, 43),
+				held,
+				rootPem,
+				kNow,
+				nullptr,
+				VersionCheck::AllowAny);
+		};
+		Check(force(stableBuild, kTarget, Channel::Stable).has_value(),
+			"explicit force accepts an older signed build");
+		Check(VerifyUpdate(stableBuild, Channel::Stable, false, kTarget,
+			MakeUpdateVersion(5000000, 42), held, rootPem, kNow, nullptr,
+			VersionCheck::AllowAny).has_value(),
+			"explicit force accepts reinstalling the same signed build");
+		auto modified = stableBuild;
+		modified[modified.size() - 1] ^= 1;
+		Check(!force(modified, kTarget, Channel::Stable),
+			"force still rejects a tampered package");
+		Check(!force(stableBuild, kOtherArch, Channel::Stable),
+			"force still rejects another platform");
+		Check(!force(stableBuild, kTarget, Channel::CanaryPrivate),
+			"force still enforces the channel policy");
 	}
 
 	{ // Dormancy rescue also works for beta packages on canary-public.

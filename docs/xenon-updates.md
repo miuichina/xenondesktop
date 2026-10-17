@@ -15,6 +15,13 @@ their update button installs the package and restarts Xenon only when clicked;
 download completion never restarts the client or reopens the release dialog.
 **Skip** remembers only that release. Checking manually includes skipped releases.
 
+**Force update**, next to **Check now**, downloads the latest release even if
+the installed build is identical or newer. It ignores skipped releases and Git
+ancestry, but still verifies the package signature, platform, channel and exact
+release version. The exception to version ordering is recorded only in that
+prepared update, so it also works when installing after a later restart.
+Installation still waits for the update button or a normal restart.
+
 The update dialog lists every commit between the installed and candidate hashes,
 including intermediate releases. GitHub compare results are paginated; unrelated
 or diverged histories are rejected. Network failures and incomplete metadata are

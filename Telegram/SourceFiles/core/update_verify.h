@@ -188,6 +188,11 @@ struct VerifiedUpdate {
 	bool adoptManifest = false;
 };
 
+enum class VersionCheck {
+	RequireNewer,
+	AllowAny,
+};
+
 [[nodiscard]] std::optional<VerifiedUpdate> VerifyUpdate(
 	const QByteArray &data,
 	Channel buildChannel,
@@ -197,6 +202,7 @@ struct VerifiedUpdate {
 	const std::optional<Manifest> &held,
 	const QByteArray &rootPublicKeyPem,
 	qint64 now,
-	QString *error = nullptr);
+	QString *error = nullptr,
+	VersionCheck versionCheck = VersionCheck::RequireNewer);
 
 } // namespace Core::Updates

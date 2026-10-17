@@ -9,6 +9,7 @@ void SetAutomaticallyCheck(bool enabled);
 void SetAutomaticallyInstall(bool enabled);
 void Start(bool scheduled = false);
 void CheckNow();
+void ForceUpdate();
 [[nodiscard]] rpl::producer<QString> Status();
 [[nodiscard]] QString BuildDescription();
 
