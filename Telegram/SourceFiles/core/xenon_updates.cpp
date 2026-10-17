@@ -8,7 +8,6 @@
 #include "core/version.h"
 #include "lang/lang_keys.h"
 #include "ui/layers/generic_box.h"
-#include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "window/window_controller.h"
 #include "xenon_build.h"
@@ -56,7 +55,6 @@ public:
 	~Service() override;
 	void check(bool manual);
 	void preferencesChanged();
-	void installPreferenceChanged();
 	[[nodiscard]] rpl::producer<QString> status() const;
 
 private:
@@ -64,7 +62,7 @@ private:
 	void metadata(const QJsonObject &release);
 	void compare(int page);
 	void offer();
-	void download(bool restart);
+	void download();
 	void fail();
 	void finish();
 
@@ -75,12 +73,10 @@ private:
 	QPointer<Ui::GenericBox> _box;
 	UpdateChecker _checker;
 	rpl::variable<QString> _status;
-	rpl::variable<bool> _loading = false;
 	Release _release;
 	bool _busy = false;
 	bool _manual = false;
 	bool _downloading = false;
-	bool _restart = false;
 	int _totalCommits = 0;
 	int _receivedCommits = 0;
 	qint64 _nextCheck = 0;
@@ -105,44 +101,21 @@ Service::Service() : QObject(QCoreApplication::instance()) {
 			_reply->abort();
 		}
 	});
-	_checker.progress() | rpl::on_next([=](UpdateChecker::Progress progress) {
+	_checker.progress() | rpl::on_next([=] {
 		if (_downloading) {
-			_status = tr::lng_xenon_update_downloading(
-				tr::now,
-				lt_percent,
-				QString::number(progress.size > 0
-					? std::clamp(progress.already * 100 / progress.size, int64(0), int64(100))
-					: 0));
+			_status = _checker.statusText();
 		}
 	}, _lifetime);
 	_checker.failed() | rpl::on_next([=] {
 		if (_downloading) {
 			_downloading = false;
-			_loading = false;
-			_restart = false;
 			fail();
 		}
 	}, _lifetime);
 	_checker.ready() | rpl::on_next([=] {
-		if (!_downloading) {
-			return;
-		}
-		_downloading = false;
-		_loading = false;
-		_status = tr::lng_xenon_update_ready(tr::now);
-		if (_restart) {
-			_restart = false;
-			if (checkReadyUpdate()) {
-				Restart();
-			} else {
-				fail();
-			}
-		} else {
-			if (!AutomaticallyInstall()) {
-				_checker.discard();
-				_status = tr::lng_xenon_update_available(tr::now);
-			}
-			offer();
+		if (_downloading) {
+			_downloading = false;
+			_status = tr::lng_xenon_update_ready(tr::now);
 		}
 	}, _lifetime);
 }
@@ -165,21 +138,10 @@ void Service::preferencesChanged() {
 	}
 }
 
-void Service::installPreferenceChanged() {
-	if (!AutomaticallyInstall() && !_restart && !_downloading
-		&& _checker.state() == UpdateChecker::State::Ready) {
-		_checker.discard();
-		_status = tr::lng_xenon_update_available(tr::now);
-	}
-}
-
 void Service::check(bool manual) {
 	if (_busy || _downloading || Quitting()) {
 		return;
 	} else if (_box || _checker.state() == UpdateChecker::State::Ready) {
-		if (manual) {
-			offer();
-		}
 		finish();
 		return;
 	} else if (!manual && !AutomaticallyCheck()) {
@@ -343,7 +305,7 @@ void Service::compare(int page) {
 		finish();
 		_status = tr::lng_xenon_update_available(tr::now);
 		if (AutomaticallyInstall() && !_manual) {
-			download(false);
+			download();
 		} else {
 			offer();
 		}
@@ -373,20 +335,14 @@ void Service::offer() {
 			box,
 			rpl::single(_release.changes),
 			st::boxLabel));
-		const auto update = box->addButton(tr::lng_xenon_update_action(), [=] {
+		box->addButton(tr::lng_xenon_update_action(), [=] {
 			if (_downloading) {
 				return;
-			} else if (_checker.state() == UpdateChecker::State::Ready) {
-				if (checkReadyUpdate()) {
-					Restart();
-				} else {
-					fail();
-				}
-			} else {
-				download(true);
 			}
+			box->closeBox();
+			download();
 		});
-		const auto skip = box->addButton(tr::lng_xenon_update_skip(), [=] {
+		box->addButton(tr::lng_xenon_update_skip(), [=] {
 			if (_downloading) {
 				return;
 			}
@@ -397,21 +353,18 @@ void Service::offer() {
 			box->closeBox();
 			finish();
 		});
-		_loading.value() | rpl::on_next([=](bool loading) {
-			update->setDisabled(loading);
-			skip->setDisabled(loading);
-		}, box->lifetime());
 	}));
 }
 
-void Service::download(bool restart) {
+void Service::download() {
 	if (_downloading || _release.package.isEmpty()) {
 		return;
 	}
 	_downloading = true;
-	_loading = true;
-	_restart = restart;
-	_status = tr::lng_xenon_update_available(tr::now);
+	_status = tr::lng_xenon_update_downloading(
+		tr::now,
+		lt_percent,
+		QString::number(0));
 	_checker.download(_release.package, _release.version);
 }
 
@@ -455,7 +408,6 @@ void SetAutomaticallyCheck(bool enabled) {
 void SetAutomaticallyInstall(bool enabled) {
 	App().settings().writePref<bool>(kInstallPreference, enabled);
 	App().saveSettingsDelayed();
-	Instance().installPreferenceChanged();
 }
 
 void Start(bool scheduled) {

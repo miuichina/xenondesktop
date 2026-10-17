@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_box_controller.h"
 #include "calls/calls_instance.h"
 #include "core/application.h"
+#include "core/update_checker.h"
 #include "core/click_handler_types.h"
 #include "data/data_changes.h"
 #include "data/data_document_media.h"
@@ -656,6 +657,34 @@ void MainMenu::showFinished() {
 
 void MainMenu::setupMenu() {
 	using namespace Settings;
+
+	if (!Core::UpdaterDisabled()) {
+		const auto checker = Core::UpdateChecker();
+		const auto update = _menu->add(
+			object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
+				_menu,
+				CreateButtonWithIcon(
+					_menu,
+					checker.changes() | rpl::map([=] {
+						return checker.statusText();
+					}),
+					st::mainMenuButton,
+					{ &st::menuIconDownload })));
+		update->toggleOn(checker.changes() | rpl::map([=] {
+			return checker.state() != Core::UpdateChecker::State::None;
+		}));
+		update->finishAnimating();
+		checker.changes() | rpl::on_next([=] {
+			update->entity()->setDisabled(
+				checker.state() != Core::UpdateChecker::State::Ready);
+		}, update->lifetime());
+		update->entity()->setClickedCallback([] {
+			if (Core::UpdateChecker().state() == Core::UpdateChecker::State::Ready
+				&& Core::checkReadyUpdate()) {
+				Core::Restart();
+			}
+		});
+	}
 
 	const auto controller = _controller;
 	const auto addAction = [&](

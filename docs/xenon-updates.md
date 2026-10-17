@@ -8,9 +8,12 @@ Xenon Settings contains **Automatically check for updates** (enabled by default)
 **Automatically install updates** (disabled by default) and **Check now**.
 Automatic checks run at startup and hourly. Automatic installation downloads and
 prepares a package in the background, then installs it on the next restart.
-With automatic installation disabled, **Update** downloads the package and
-restarts Xenon after verification. **Skip** remembers only that release and
-discards a prepared update. Checking manually includes skipped releases.
+With automatic installation disabled, **Download** closes the release dialog
+immediately and downloads the package in the background. The chat list's update
+bar and the main menu show download progress and package preparation. Once ready,
+their update button installs the package and restarts Xenon only when clicked;
+download completion never restarts the client or reopens the release dialog.
+**Skip** remembers only that release. Checking manually includes skipped releases.
 
 The update dialog lists every commit between the installed and candidate hashes,
 including intermediate releases. GitHub compare results are paginated; unrelated

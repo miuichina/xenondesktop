@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "info/info_memento.h"
 #include "info/info_controller.h"
+#include "lang/lang_keys.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "settings/sections/settings_advanced.h"
@@ -1675,6 +1676,8 @@ auto Updater::state() const -> State {
 		return State::Ready;
 	} else if (_action == Action::Loading) {
 		return State::Download;
+	} else if (_action == Action::Unpacking) {
+		return State::Unpacking;
 	}
 	return State::None;
 }
@@ -1891,6 +1894,7 @@ bool Updater::tryLoaders() {
 
 			_retryTimer.callOnce(kUpdaterTimeout);
 			loader->wipeFolder();
+			_progress.fire({});
 			loader->start();
 		} else {
 			_isLatest.fire({});
@@ -1923,9 +1927,10 @@ void Updater::finalize(QString filepath) {
 	if (_action != Action::Loading) {
 		return;
 	}
-	_retryTimer.cancel();
 	_activeLoader = nullptr;
 	_action = Action::Unpacking;
+	_progress.fire({});
+	_retryTimer.cancel();
 	const auto expectedVersion = _expectedVersion;
 	crl::async([=] {
 		const auto ready = UnpackUpdate(filepath, expectedVersion);
@@ -1955,6 +1960,15 @@ UpdateChecker::UpdateChecker()
 			_updater->setMtproto(session);
 		}
 	}
+}
+
+rpl::producer<> UpdateChecker::changes() const {
+	return rpl::single(rpl::empty) | rpl::then(rpl::merge(
+		checking(),
+		isLatest(),
+		failed(),
+		ready(),
+		progress() | rpl::map([] { return rpl::empty; })));
 }
 
 rpl::producer<> UpdateChecker::checking() const {
@@ -2005,6 +2019,28 @@ void UpdateChecker::stop() {
 auto UpdateChecker::state() const
 -> State {
 	return _updater->state();
+}
+
+QString UpdateChecker::statusText() const {
+	switch (state()) {
+	case State::Download: {
+		const auto total = size();
+		const auto progress = total > 0
+			? std::clamp(int64(already()) * 100 / total, int64(0), int64(100))
+			: 0;
+		return tr::lng_xenon_update_downloading(
+			tr::now,
+			lt_percent,
+			QString::number(progress));
+	} break;
+	case State::Unpacking:
+		return tr::lng_xenon_update_preparing(tr::now);
+	case State::Ready:
+		return tr::lng_update_telegram(tr::now);
+	case State::None:
+		return QString();
+	}
+	Unexpected("Update checker state.");
 }
 
 int UpdateChecker::already() const {

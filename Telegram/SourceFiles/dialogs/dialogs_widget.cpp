@@ -680,12 +680,7 @@ Widget::Widget(
 
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
-		rpl::merge(
-			rpl::single(rpl::empty),
-			checker.isLatest(),
-			checker.failed(),
-			checker.ready()
-		) | rpl::on_next([=] {
+		checker.changes() | rpl::on_next([=] {
 			checkUpdateStatus();
 		}, lifetime());
 	}
@@ -2665,21 +2660,28 @@ void Widget::checkUpdateStatus() {
 	}
 
 	using Checker = Core::UpdateChecker;
-	if (Checker().state() == Checker::State::Ready) {
+	const auto checker = Checker();
+	const auto state = checker.state();
+	if (state != Checker::State::None) {
 		if (_updateTelegram) {
+			_updateTelegram->setText(checker.statusText());
+			_updateTelegram->setDisabled(state != Checker::State::Ready);
 			return;
 		}
 		_updateTelegram.create(
 			this,
-			tr::lng_update_telegram(tr::now),
+			checker.statusText(),
 			st::dialogsUpdateButton,
 			st::dialogsInstallUpdate,
 			st::dialogsInstallUpdateOver,
 			true);
+		_updateTelegram->setDisabled(state != Checker::State::Ready);
 		_updateTelegram->show();
 		_updateTelegram->setClickedCallback([] {
-			Core::checkReadyUpdate();
-			Core::Restart();
+			if (Checker().state() == Checker::State::Ready
+				&& Core::checkReadyUpdate()) {
+				Core::Restart();
+			}
 		});
 		if (_connecting) {
 			_connecting->raise();

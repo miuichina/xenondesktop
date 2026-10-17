@@ -25,12 +25,14 @@ public:
 	enum class State {
 		None,
 		Download,
+		Unpacking,
 		Ready,
 	};
 	using Progress = MTP::AbstractDedicatedLoader::Progress;
 
 	UpdateChecker();
 
+	rpl::producer<> changes() const;
 	rpl::producer<> checking() const;
 	rpl::producer<> isLatest() const;
 	rpl::producer<Progress> progress() const;
@@ -46,6 +48,7 @@ public:
 	void setMtproto(base::weak_ptr<Main::Session> session);
 
 	State state() const;
+	QString statusText() const;
 	int already() const;
 	int size() const;
 	bool percent() const;
