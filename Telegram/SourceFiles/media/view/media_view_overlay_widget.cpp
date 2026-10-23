@@ -187,6 +187,7 @@ constexpr auto kPreloadCount = 3;
 constexpr auto kMaxZoomLevel = 7; // x8
 constexpr auto kZoomToScreenLevel = 1024;
 constexpr auto kPinchZoomStep = 0.25;
+constexpr auto kZoomDuration = crl::time(200);
 constexpr auto kOverlayLoaderPriority = 2;
 constexpr auto kSeekTimeMs = 5 * crl::time(1000);
 constexpr auto kSeekTimeMsLong = 10 * crl::time(1000);
@@ -2980,20 +2981,10 @@ void OverlayWidget::zoomReset() {
 	} else {
 		newZoom = 0;
 	}
-	_x = -_width / 2;
-	_y = _skipTop - (_height / 2);
-	float64 z = (_zoom == kZoomToScreenLevel) ? full : _zoom;
-	if (z >= 0) {
-		_x = int(base::SafeRound(_x * (z + 1)));
-		_y = int(base::SafeRound(_y * (z + 1)));
-	} else {
-		_x = int(base::SafeRound(_x / (-z + 1)));
-		_y = int(base::SafeRound(_y / (-z + 1)));
-	}
-	_x += width() / 2;
-	_y += _availableHeight / 2;
-	update();
 	zoomUpdate(newZoom);
+	_x = (width() - _w) / 2;
+	_y = _skipTop + (_availableHeight - _h) / 2;
+	update();
 }
 
 void OverlayWidget::zoomUpdate(
@@ -7667,13 +7658,13 @@ void OverlayWidget::setZoomLevel(
 		_y = int(base::SafeRound(ny / (-z + 1) + anchorY));
 	}
 	snapXY();
-	if (_opengl) {
+	if (_opengl || !videoShown()) {
 		_geometryAnimation.start(
 			[=] { update(); },
 			0.,
 			1.,
-			st::widgetFadeDuration/*,
-			anim::easeOutCirc*/);
+			kZoomDuration,
+			anim::easeOutCubic);
 	}
 	update();
 }

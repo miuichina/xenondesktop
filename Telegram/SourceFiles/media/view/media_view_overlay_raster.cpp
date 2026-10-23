@@ -75,7 +75,8 @@ void OverlayWidget::RendererSW::paintFallback(
 }
 
 void OverlayWidget::RendererSW::paintBackground() {
-	const auto region = _owner->opaqueContentShown()
+	const auto region = (_owner->opaqueContentShown()
+		&& !_owner->_geometryAnimation.animating())
 		? (*_clip - _owner->finalContentRect())
 		: *_clip;
 
