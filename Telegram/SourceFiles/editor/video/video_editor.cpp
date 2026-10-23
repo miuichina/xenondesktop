@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/video/video_timeline.h"
 #include "editor/video/video_timeline_seeker.h"
 #include "lang/lang_keys.h"
+#include "media/media_video_frames.h"
 #include "media/view/media_view_pip.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/layers/layer_widget.h"
@@ -531,8 +532,7 @@ void VideoEditor::setupControls() {
 		_cancel.fire({});
 	});
 	_confirm->setClickedCallback([=] {
-		_timeline->commitPendingEdit();
-		_done.fire(collect());
+		confirm();
 	});
 }
 
@@ -904,12 +904,61 @@ void VideoEditor::paintPlayBadge(QPainter &p) {
 }
 
 void VideoEditor::keyPressEvent(QKeyEvent *e) {
-	if (e->key() == Qt::Key_Escape) {
+	const auto key = e->key();
+	if (_data.frameOnly && (key == Qt::Key_Left || key == Qt::Key_Right)) {
+		if (!_confirmAfterFrameStep) {
+			stepFrame((key == Qt::Key_Right) ? 1 : -1);
+		}
+		e->accept();
+	} else if (key == Qt::Key_Escape) {
 		_cancel.fire({});
-	} else if (e->key() == Qt::Key_Enter || e->key() == Qt::Key_Return) {
-		_timeline->commitPendingEdit();
-		_done.fire(collect());
+	} else if (key == Qt::Key_Enter || key == Qt::Key_Return) {
+		confirm();
+	} else {
+		RpWidget::keyPressEvent(e);
 	}
+}
+
+void VideoEditor::stepFrame(int direction) {
+	if (direction) {
+		_pendingFrameSteps.push_back(direction > 0);
+	}
+	if (_steppingFrame || _pendingFrameSteps.empty()) {
+		return;
+	}
+	const auto forward = _pendingFrameSteps.front();
+	_pendingFrameSteps.pop_front();
+	_steppingFrame = true;
+	const auto position = _timeline->cover();
+	const auto path = _path;
+	const auto content = _content;
+	crl::async([=, weak = base::make_weak(this)] {
+		const auto next = Media::Video::AdjacentFramePosition(
+			path,
+			content,
+			position,
+			forward);
+		crl::on_main(weak, [=] {
+			_steppingFrame = false;
+			if (next && _timeline->cover() == position) {
+				_timeline->setCoverPosition(*next);
+			}
+			if (!_pendingFrameSteps.empty()) {
+				stepFrame(0);
+			} else if (_confirmAfterFrameStep) {
+				confirm();
+			}
+		});
+	});
+}
+
+void VideoEditor::confirm() {
+	if (_steppingFrame) {
+		_confirmAfterFrameStep = true;
+		return;
+	}
+	_timeline->commitPendingEdit();
+	_done.fire(collect());
 }
 
 VideoModifications VideoEditor::collect() const {

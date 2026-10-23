@@ -72,6 +72,7 @@ public:
 
 	void setTrim(crl::time from, crl::time till);
 	void setPlaybackPosition(crl::time position);
+	void setCoverPosition(crl::time position);
 	void commitPendingEdit();
 
 	void setSizeLabel(const QString &text);

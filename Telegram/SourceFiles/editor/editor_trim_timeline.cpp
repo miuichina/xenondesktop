@@ -516,6 +516,10 @@ void TrimTimeline::setTrim(crl::time from, crl::time till) {
 	update();
 }
 
+void TrimTimeline::setCoverPosition(crl::time position) {
+	setCover(std::clamp(position, _from, _till), true);
+}
+
 void TrimTimeline::setPlaybackPosition(crl::time position) {
 	const auto clamped = std::clamp(position, _from, _till);
 	if (_playback == clamped) {

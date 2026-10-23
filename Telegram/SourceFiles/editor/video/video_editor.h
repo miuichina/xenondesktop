@@ -14,6 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/video/video_editor_common.h"
 #include "ui/rp_widget.h"
 
+#include <deque>
+
 namespace Ui {
 class IconButton;
 class LayerWidget;
@@ -77,6 +79,8 @@ private:
 	void applyGeometry();
 	void paint(QPainter &p);
 	void keyPressEvent(QKeyEvent *e) override;
+	void stepFrame(int direction);
+	void confirm();
 
 	const QString _path;
 	const QByteArray _content;
@@ -118,6 +122,9 @@ private:
 	QRect _innerRect;
 	bool _dragging = false;
 	bool _userPaused = false;
+	bool _steppingFrame = false;
+	bool _confirmAfterFrameStep = false;
+	std::deque<bool> _pendingFrameSteps;
 	crl::time _bubbleCover = -1;
 	bool _bubbleBusy = false;
 	bool _bubbleVisible = false;

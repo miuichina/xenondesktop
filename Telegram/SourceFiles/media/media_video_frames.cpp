@@ -196,6 +196,9 @@ public:
 
 	[[nodiscard]] bool valid() const;
 	[[nodiscard]] QImage take(crl::time position);
+	[[nodiscard]] std::optional<crl::time> adjacentPosition(
+		crl::time position,
+		bool forward);
 
 private:
 	[[nodiscard]] bool receiveInto(not_null<AVFrame*> frame);
@@ -294,6 +297,43 @@ bool Extractor::receiveInto(not_null<AVFrame*> frame) {
 	}
 }
 
+std::optional<crl::time> Extractor::adjacentPosition(
+		crl::time position,
+		bool forward) {
+	position = std::max(position, crl::time(0));
+	seekTo(std::max(position - 1, crl::time(0)));
+	const auto timeBase = _source.videoStream->time_base;
+	auto previous = crl::time(-1);
+	auto beforePrevious = crl::time(-1);
+	auto selected = crl::time(-1);
+	while (receiveInto(_frame.get())) {
+		const auto at = FramePosition(_frame.get(), timeBase);
+		av_frame_unref(_frame.get());
+		if (at < 0) {
+			continue;
+		} else if (selected >= 0) {
+			if (at > selected) {
+				return at;
+			}
+		} else if (at >= position) {
+			if (!forward) {
+				return (previous >= 0) ? previous : at;
+			}
+			selected = at;
+		}
+		beforePrevious = previous;
+		previous = at;
+	}
+	if (selected >= 0) {
+		return selected;
+	} else if (!forward && beforePrevious >= 0) {
+		return beforePrevious;
+	} else if (!forward && previous >= 0 && previous < position) {
+		return adjacentPosition(previous, false);
+	}
+	return (previous >= 0) ? std::make_optional(previous) : std::nullopt;
+}
+
 QImage Extractor::take(crl::time position) {
 	const auto timeBase = _source.videoStream->time_base;
 	const auto behind = (_decodedPosition < 0)
@@ -379,6 +419,22 @@ void ExtractFrames(
 			return;
 		}
 	}
+}
+
+std::optional<crl::time> AdjacentFramePosition(
+		const QString &path,
+		const QByteArray &content,
+		crl::time position,
+		bool forward) {
+	auto source = Source();
+	if (!OpenSource(source, path, content, true)) {
+		return std::nullopt;
+	}
+	const auto request = ExtractRequest();
+	auto extractor = Extractor(source, request);
+	return extractor.valid()
+		? extractor.adjacentPosition(position, forward)
+		: std::nullopt;
 }
 
 QImage ExtractFrame(
