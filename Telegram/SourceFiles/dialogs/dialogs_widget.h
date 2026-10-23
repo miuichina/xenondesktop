@@ -10,12 +10,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_peer_search.h"
 #include "base/timer.h"
 #include "dialogs/dialogs_key.h"
+#include "history/view/history_view_top_bar_blur.h"
 #include "window/section_widget.h"
 #include "ui/controls/swipe_handler_data.h"
 #include "ui/effects/animations.h"
 #include "ui/userpic_view.h"
 #include "mtproto/sender.h"
 #include "api/api_single_message_search.h"
+
+#include <array>
 
 class ChannelData;
 
@@ -259,7 +262,7 @@ private:
 	void updateSearchFromVisibility(bool fast = false);
 	void updateControlsGeometry();
 	QImage renderBlurBackdrop(QRect area);
-	void invalidateBlurBackdrop();
+	void invalidateBlurBackdrop(bool contentChanged = true);
 	void refreshTopBars();
 	void showSearchInTopBar(anim::type animated);
 	void checkUpdateStatus();
@@ -338,6 +341,7 @@ private:
 
 	object_ptr<Ui::RpWidget> _searchControls;
 	std::unique_ptr<HistoryView::BlurBackground> _headerBlur;
+	std::array<HistoryView::BlurBackdropCache, 2> _blurContentCache;
 	QImage _headerBlurImage;
 	QRect _headerBlurRect;
 	object_ptr<HistoryView::TopBarWidget> _subsectionTopBar = { nullptr };

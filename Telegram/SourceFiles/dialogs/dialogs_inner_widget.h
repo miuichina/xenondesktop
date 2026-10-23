@@ -220,6 +220,7 @@ public:
 	[[nodiscard]] rpl::producer<> changeSearchFromRequests() const;
 	[[nodiscard]] rpl::producer<ChosenRow> chosenRow() const;
 	[[nodiscard]] rpl::producer<> updated() const;
+	// Structural changes use an empty area because the old row bounds can move.
 	[[nodiscard]] rpl::producer<QRect> backdropChanges() const;
 
 	[[nodiscard]] rpl::producer<int> scrollByDeltaRequests() const;

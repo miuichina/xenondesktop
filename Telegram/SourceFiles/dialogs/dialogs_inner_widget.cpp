@@ -3027,7 +3027,9 @@ bool InnerWidget::pinnedShiftAnimationCallback(crl::time now) {
 			accumulate_max(updateHeight, (aboveRowBottom - updateFrom) + aboveTopShift);
 			_aboveTopShift = aboveTopShift;
 		}
-		update(0, updateFrom, width(), updateHeight);
+		const auto area = QRect(0, updateFrom, width(), updateHeight);
+		_backdropChanges.fire_copy(area);
+		update(area);
 	}
 	if (!animating) {
 		_aboveIndex = _draggingIndex;
@@ -3491,6 +3493,11 @@ void InnerWidget::handleChatListEntryRefreshes() {
 			}
 			refresh();
 		} else if (_state == WidgetState::Default && from != to) {
+			_backdropChanges.fire(QRect(
+				0,
+				std::min(from, to),
+				width(),
+				std::abs(from - to) + event.moved.height));
 			update(
 				0,
 				std::min(from, to),
@@ -3859,6 +3866,11 @@ void InnerWidget::paintAnimatedPreview(
 }
 
 void InnerWidget::updateSelectedRow(Key key) {
+	const auto repaint = [&](int x, int y, int w, int h) {
+		const auto area = QRect(x, y, w, h);
+		_backdropChanges.fire_copy(area);
+		update(area);
+	};
 	if (key) {
 		invalidateCachedRow(RowsCacheKey(key.entry()));
 	} else if (_selected) {
@@ -3876,14 +3888,14 @@ void InnerWidget::updateSelectedRow(Key key) {
 				const auto yadd = _pinnedRows[position].yadd.current();
 				top += int(base::SafeRound(yadd));
 			}
-			update(0, top + row->top(), width(), row->height());
+			repaint(0, top + row->top(), width(), row->height());
 		} else if (_selected) {
-			update(0, dialogsOffset() + _selected->top(), width(), _selected->height());
+			repaint(0, dialogsOffset() + _selected->top(), width(), _selected->height());
 		} else if (_collapsedSelected >= 0) {
-			update(0, _collapsedSelected * st::dialogsImportantBarHeight, width(), st::dialogsImportantBarHeight);
+			repaint(0, _collapsedSelected * st::dialogsImportantBarHeight, width(), st::dialogsImportantBarHeight);
 		} else if (_communitySelected >= 0) {
 			if (const auto row = communityRowAt(_communitySelected)) {
-				update(
+				repaint(
 					0,
 					communityRowAbsoluteTop(_communitySelected),
 					width(),
@@ -3895,23 +3907,23 @@ void InnerWidget::updateSelectedRow(Key key) {
 			for (auto i = 0, l = int(_filterResults.size()); i != l; ++i) {
 				const auto &result = _filterResults[i];
 				if (result.key() == key) {
-					update(0, filteredOffset() + result.top, width(), result.row->height());
+					repaint(0, filteredOffset() + result.top, width(), result.row->height());
 					break;
 				}
 			}
 		} else if (_hashtagSelected >= 0) {
-			update(0, hashtagsOffset() + _hashtagSelected * st::mentionHeight, width(), st::mentionHeight);
+			repaint(0, hashtagsOffset() + _hashtagSelected * st::mentionHeight, width(), st::mentionHeight);
 		} else if (_filteredSelected >= 0) {
 			if (_filteredSelected < _filterResults.size()) {
 				const auto &result = _filterResults[_filteredSelected];
-				update(0, filteredOffset() + result.top, width(), result.row->height());
+				repaint(0, filteredOffset() + result.top, width(), result.row->height());
 			}
 		} else if (_peerSearchSelected >= 0) {
-			update(0, peerSearchOffset() + _peerSearchSelected * st::dialogsRowHeight, width(), st::dialogsRowHeight);
+			repaint(0, peerSearchOffset() + _peerSearchSelected * st::dialogsRowHeight, width(), st::dialogsRowHeight);
 		} else if (_previewSelected >= 0) {
-			update(0, previewOffset() + _previewSelected * _st->height, width(), _st->height);
+			repaint(0, previewOffset() + _previewSelected * _st->height, width(), _st->height);
 		} else if (_searchedSelected >= 0) {
-			update(0, searchedOffset() + _searchedSelected * _st->height, width(), _st->height);
+			repaint(0, searchedOffset() + _searchedSelected * _st->height, width(), _st->height);
 		}
 	}
 }
@@ -5086,6 +5098,7 @@ void InnerWidget::editOpenedFilter() {
 void InnerWidget::refresh(bool toTop) {
 	_rowsScrollCache.clear();
 	_cachedRows.clear();
+	_backdropChanges.fire({});
 	_activeSubItemsRow = nullptr;
 	if (!_geometryInited) {
 		return;

@@ -509,9 +509,18 @@ Widget::Widget(
 		[=] { return renderBlurBackdrop(_searchControls->geometry()); },
 		[] { return st::dialogsBg->c; });
 	_inner->backdropChanges() | rpl::on_next([=](QRect area) {
+		if (area.isEmpty()) {
+			invalidateBlurBackdrop();
+			return;
+		}
 		const auto dirty = area.translated(_inner->mapTo(this, QPoint()));
 		const auto padding = st::topBarBlurRadius;
-		if (dirty.intersects(_searchControls->geometry().adjusted(0, -padding, 0, padding))
+		const auto cached = std::any_of(
+			_blurContentCache.begin(),
+			_blurContentCache.end(),
+			[&](const auto &cache) { return cache.intersects(area); });
+		if (cached
+			|| dirty.intersects(_searchControls->geometry().adjusted(0, -padding, 0, padding))
 			|| (_subsectionTopBar && dirty.intersects(
 				_subsectionTopBar->geometry().adjusted(0, -padding, 0, padding)))) {
 			invalidateBlurBackdrop();
@@ -520,8 +529,11 @@ Widget::Widget(
 	session().downloaderTaskFinished() | rpl::on_next([=] {
 		invalidateBlurBackdrop();
 	}, lifetime());
-	_scroll->scrolls() | rpl::on_next([=] { invalidateBlurBackdrop(); }, lifetime());
+	_scroll->scrolls() | rpl::on_next([=] {
+		invalidateBlurBackdrop(false);
+	}, lifetime());
 	rpl::merge(
+		style::PaletteChanged(),
 		base::options::lookup<bool>(HistoryView::kOptionBlurEffects).changes(),
 		base::options::lookup<int>(HistoryView::kOptionBlurIntensity).changes()
 	) | rpl::on_next([=] {
@@ -5040,11 +5052,20 @@ QImage Widget::renderBlurBackdrop(QRect area) {
 	const auto clip = area.adjusted(0, -padding, 0, padding).translated(-origin);
 	p.translate(origin);
 	p.setClipRect(clip);
-	_inner->paintBackdrop(p, clip);
+	auto &cache = _blurContentCache[
+		_subsectionTopBar && area == _subsectionTopBar->geometry() ? 1 : 0];
+	cache.paint(p, clip, scale, [&](Painter &p, QRect cachedArea) {
+		_inner->paintBackdrop(p, cachedArea);
+	});
 	return image;
 }
 
-void Widget::invalidateBlurBackdrop() {
+void Widget::invalidateBlurBackdrop(bool contentChanged) {
+	if (contentChanged) {
+		for (auto &cache : _blurContentCache) {
+			cache.invalidate();
+		}
+	}
 	if (!base::options::value<bool>(HistoryView::kOptionBlurEffects)) {
 		return;
 	}
