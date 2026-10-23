@@ -447,7 +447,7 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 	if (testAttribute(Qt::WA_TranslucentBackground)) {
 		const auto palette = lifetime().make_state<AcrylicPalette>();
 		palette->rebuild();
-		Ui::SetWindowPalette(this, [=] {
+		Ui::SetWindowPalette(this, [=](bool) {
 			return property("xenonWindowsBackdrop").toBool() ? palette->get() : nullptr;
 		});
 		rpl::merge(
