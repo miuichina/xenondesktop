@@ -19,6 +19,7 @@ permissions:
 concurrency:
   group: windows-release-publish
   cancel-in-progress: false
+  queue: max
 
 jobs:
   publish:
