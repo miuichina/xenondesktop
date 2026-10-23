@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <optional>
 
@@ -46,8 +47,15 @@ public:
 
 	[[nodiscard]] std::optional<crl::time> adjacentPosition(
 		crl::time position,
-		bool forward);
-	[[nodiscard]] QImage frame(crl::time position, QSize box = QSize());
+		bool forward,
+		QSize box = QSize(),
+		const std::shared_ptr<std::atomic<bool>> &cancel = nullptr);
+	[[nodiscard]] QImage cachedFrame(crl::time position, QSize box);
+	[[nodiscard]] QImage frame(
+		crl::time position,
+		QSize box = QSize(),
+		const std::shared_ptr<std::atomic<bool>> &cancel = nullptr,
+		bool preloadPrevious = false);
 
 private:
 	struct Private;

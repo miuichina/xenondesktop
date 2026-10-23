@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/video/video_editor_common.h"
 #include "ui/rp_widget.h"
 
+#include <atomic>
 #include <deque>
 
 namespace Ui {
@@ -79,12 +80,14 @@ private:
 	[[nodiscard]] QSize bubbleSize() const;
 	void refreshCoverPreview();
 	void refreshFramePreview();
+	[[nodiscard]] QSize framePreviewBox() const;
 	void invalidateCoverPreview();
 	void togglePause();
 	void paintPlayBadge(QPainter &p);
 	void applyGeometry();
 	void paint(QPainter &p);
 	void keyPressEvent(QKeyEvent *e) override;
+	void keyReleaseEvent(QKeyEvent *e) override;
 	void stepFrame(int direction);
 	void confirm();
 
@@ -127,6 +130,11 @@ private:
 	QSize _framePreviewBox;
 	crl::time _framePreviewAt = -1;
 	bool _framePreviewBusy = false;
+	crl::time _requestedFramePreviewAt = -1;
+	QSize _requestedFramePreviewBox;
+	std::shared_ptr<std::atomic<bool>> _framePreviewCancel;
+	std::shared_ptr<std::atomic<bool>> _frameStepCancel;
+	int _frameStepKey = 0;
 
 	QRect _frameRect;
 	QTransform _frameMatrix;

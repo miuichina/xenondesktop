@@ -38,6 +38,7 @@ constexpr auto kBubbleMinVisible = crl::time(600);
 constexpr auto kBubbleDuration = crl::time(500);
 
 constexpr auto kCaptureDuration = crl::time(420);
+constexpr auto kFastFramePreviewScale = 0.25;
 
 class ControlsBar final : public Ui::RpWidget {
 public:
@@ -244,7 +245,14 @@ VideoEditor::VideoEditor(
 	}, lifetime());
 }
 
-VideoEditor::~VideoEditor() = default;
+VideoEditor::~VideoEditor() {
+	if (_framePreviewCancel) {
+		_framePreviewCancel->store(true);
+	}
+	if (_frameStepCancel) {
+		_frameStepCancel->store(true);
+	}
+}
 
 void VideoEditor::setupTimeline() {
 	// A sibling of the controls container would never see a mouse press.
@@ -289,6 +297,17 @@ void VideoEditor::setupTimeline() {
 	_timeline->draggingChanges(
 	) | rpl::on_next([=](bool dragging) {
 		_dragging = dragging;
+		if (_data.frameOnly) {
+			if (dragging) {
+				_pendingFrameSteps.clear();
+				_frameStepKey = 0;
+				if (_frameStepCancel) {
+					_frameStepCancel->store(true);
+				}
+			}
+			refreshFramePreview();
+			return;
+		}
 		if (dragging) {
 			_draggingHead = _timeline->draggingHead();
 		}
@@ -652,23 +671,56 @@ void VideoEditor::refreshCoverPreview() {
 	});
 }
 
+QSize VideoEditor::framePreviewBox() const {
+	const auto box = _frameRect.size() * style::DevicePixelRatio();
+	return (_dragging || _frameStepKey)
+		? (_frameRect.size() * kFastFramePreviewScale).expandedTo(QSize(1, 1))
+		: box;
+}
+
 void VideoEditor::refreshFramePreview() {
-	if (!_frameReader || _framePreviewBusy || _frameRect.isEmpty()) {
+	if (!_frameReader || _frameRect.isEmpty()) {
 		return;
 	}
 	const auto position = _cover;
-	const auto box = _frameRect.size() * style::DevicePixelRatio();
+	const auto box = framePreviewBox();
+	if (_framePreviewBusy
+		&& (_requestedFramePreviewAt != position
+			|| _requestedFramePreviewBox != box)) {
+		_framePreviewCancel->store(true);
+	}
 	if (_framePreviewAt == position && _framePreviewBox == box) {
 		return;
 	}
+	auto cached = _frameReader->cachedFrame(position, box);
+	if (!cached.isNull()) {
+		_framePreview = std::move(cached);
+		_framePreviewAt = position;
+		_framePreviewBox = box;
+		update();
+		return;
+	} else if (_dragging && _framePreviewAt != position) {
+		auto immediate = _timeline->previewFrame(position);
+		if (!immediate.isNull()) {
+			_framePreview = std::move(immediate);
+			_framePreviewAt = -1;
+			update();
+		}
+	}
+	if (_framePreviewBusy) {
+		return;
+	}
 	_framePreviewBusy = true;
+	_requestedFramePreviewAt = position;
+	_requestedFramePreviewBox = box;
+	const auto cancel = std::make_shared<std::atomic<bool>>(false);
+	_framePreviewCancel = cancel;
 	const auto reader = _frameReader;
 	crl::async([=, weak = base::make_weak(this)] {
-		auto preview = reader->frame(position, box);
+		auto preview = reader->frame(position, box, cancel);
 		crl::on_main(weak, [=, preview = std::move(preview)]() mutable {
 			_framePreviewBusy = false;
-			const auto currentBox = _frameRect.size() * style::DevicePixelRatio();
-			if (_cover != position || currentBox != box) {
+			if (cancel->load() || _cover != position || framePreviewBox() != box) {
 				refreshFramePreview();
 				return;
 			} else if (!preview.isNull()) {
@@ -948,6 +1000,7 @@ void VideoEditor::paintPlayBadge(QPainter &p) {
 void VideoEditor::keyPressEvent(QKeyEvent *e) {
 	const auto key = e->key();
 	if (_data.frameOnly && (key == Qt::Key_Left || key == Qt::Key_Right)) {
+		_frameStepKey = key;
 		if (!_confirmAfterFrameStep && (!e->isAutoRepeat() || !_steppingFrame)) {
 			stepFrame((key == Qt::Key_Right) ? 1 : -1);
 		}
@@ -958,6 +1011,18 @@ void VideoEditor::keyPressEvent(QKeyEvent *e) {
 		confirm();
 	} else {
 		RpWidget::keyPressEvent(e);
+	}
+}
+
+void VideoEditor::keyReleaseEvent(QKeyEvent *e) {
+	if (_data.frameOnly && !e->isAutoRepeat() && e->key() == _frameStepKey) {
+		_frameStepKey = 0;
+		if (!_steppingFrame) {
+			refreshFramePreview();
+		}
+		e->accept();
+	} else {
+		RpWidget::keyReleaseEvent(e);
 	}
 }
 
@@ -976,15 +1041,18 @@ void VideoEditor::stepFrame(int direction) {
 	_steppingFrame = true;
 	const auto position = _timeline->cover();
 	const auto reader = _frameReader;
-	const auto box = _frameRect.size() * style::DevicePixelRatio();
+	const auto box = framePreviewBox();
+	const auto cancel = std::make_shared<std::atomic<bool>>(false);
+	_frameStepCancel = cancel;
 	crl::async([=, weak = base::make_weak(this)] {
-		const auto next = reader->adjacentPosition(position, forward);
-		auto preview = next ? reader->frame(*next, box) : QImage();
+		const auto next = reader->adjacentPosition(position, forward, box, cancel);
+		auto preview = next
+			? reader->frame(*next, box, cancel, !forward)
+			: QImage();
 		crl::on_main(weak, [=, preview = std::move(preview)]() mutable {
 			_steppingFrame = false;
-			if (next && _timeline->cover() == position) {
-				if (!preview.isNull()
-					&& box == _frameRect.size() * style::DevicePixelRatio()) {
+			if (next && !cancel->load() && _timeline->cover() == position) {
+				if (!preview.isNull()) {
 					_framePreview = std::move(preview);
 					_framePreviewAt = *next;
 					_framePreviewBox = box;

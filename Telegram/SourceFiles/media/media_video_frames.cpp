@@ -22,7 +22,8 @@ constexpr auto kForwardDecodeWindow = crl::time(3000);
 constexpr auto kMaxDecodeArea = 4096 * int64(4096);
 constexpr auto kMaxPositionCache = 2048;
 constexpr auto kMaxPreviewCacheBytes = int64(64) * 1024 * 1024;
-constexpr auto kMaxPreviewCacheFrames = 16;
+constexpr auto kMaxPreviewCacheFrames = 256;
+constexpr auto kReversePreviewSpan = crl::time(3000);
 
 struct Source {
 	ReadFileWrap fileWrap;
@@ -200,15 +201,26 @@ public:
 	~Extractor();
 
 	[[nodiscard]] bool valid() const;
-	[[nodiscard]] QImage take(crl::time position);
+	[[nodiscard]] QImage take(
+		crl::time position,
+		const std::shared_ptr<std::atomic<bool>> &cancel = nullptr,
+		Fn<void(crl::time, QImage)> cache = nullptr);
 	[[nodiscard]] std::optional<crl::time> adjacentPosition(
 		crl::time position,
-		bool forward);
+		bool forward,
+		const std::shared_ptr<std::atomic<bool>> &cancel = nullptr,
+		Fn<void(crl::time, QImage)> cache = nullptr);
 
 private:
-	[[nodiscard]] bool receiveInto(not_null<AVFrame*> frame);
+	[[nodiscard]] bool receiveInto(
+		not_null<AVFrame*> frame,
+		const std::shared_ptr<std::atomic<bool>> &cancel = nullptr);
 	void seekTo(crl::time position);
 	void keepDecodedFrame(crl::time position);
+	void cacheDecodedFrame(
+		crl::time position,
+		crl::time target,
+		const Fn<void(crl::time, QImage)> &cache);
 
 	Source &_source;
 	const ExtractRequest &_request;
@@ -264,8 +276,13 @@ void Extractor::seekTo(crl::time position) {
 	_finished = false;
 }
 
-bool Extractor::receiveInto(not_null<AVFrame*> frame) {
+bool Extractor::receiveInto(
+		not_null<AVFrame*> frame,
+		const std::shared_ptr<std::atomic<bool>> &cancel) {
 	while (true) {
+		if (cancel && cancel->load()) {
+			return false;
+		}
 		auto got = AvErrorWrap(avcodec_receive_frame(
 			_source.codec.get(),
 			frame));
@@ -323,9 +340,30 @@ void Extractor::keepDecodedFrame(crl::time position) {
 	}
 }
 
+void Extractor::cacheDecodedFrame(
+		crl::time position,
+		crl::time target,
+		const Fn<void(crl::time, QImage)> &cache) {
+	if (cache
+		&& position >= std::max(target - kReversePreviewSpan, crl::time(0))
+		&& position < target) {
+		cache(position, ConvertFrame(
+			_frame.get(),
+			_source.rotation,
+			_request.box,
+			_request.cover,
+			_scale));
+	}
+}
+
 std::optional<crl::time> Extractor::adjacentPosition(
 		crl::time position,
-		bool forward) {
+		bool forward,
+		const std::shared_ptr<std::atomic<bool>> &cancel,
+		Fn<void(crl::time, QImage)> cache) {
+	if (cancel && cancel->load()) {
+		return std::nullopt;
+	}
 	position = std::max(position, crl::time(0));
 	const auto current = ranges::lower_bound(_positions, position);
 	if (current != end(_positions)) {
@@ -346,9 +384,10 @@ std::optional<crl::time> Extractor::adjacentPosition(
 	auto previous = crl::time(-1);
 	auto beforePrevious = crl::time(-1);
 	auto selected = continuing ? selectedPosition : crl::time(-1);
-	while (receiveInto(_frame.get())) {
+	while (receiveInto(_frame.get(), cancel)) {
 		const auto at = FramePosition(_frame.get(), timeBase);
 		keepDecodedFrame(at);
+		cacheDecodedFrame(at, position, cache);
 		av_frame_unref(_frame.get());
 		if (at < 0) {
 			continue;
@@ -365,17 +404,25 @@ std::optional<crl::time> Extractor::adjacentPosition(
 		beforePrevious = previous;
 		previous = at;
 	}
-	if (selected >= 0) {
+	if (cancel && cancel->load()) {
+		return std::nullopt;
+	} else if (selected >= 0) {
 		return selected;
 	} else if (!forward && beforePrevious >= 0) {
 		return beforePrevious;
 	} else if (!forward && previous >= 0 && previous < position) {
-		return adjacentPosition(previous, false);
+		return adjacentPosition(previous, false, cancel, cache);
 	}
 	return (previous >= 0) ? std::make_optional(previous) : std::nullopt;
 }
 
-QImage Extractor::take(crl::time position) {
+QImage Extractor::take(
+		crl::time position,
+		const std::shared_ptr<std::atomic<bool>> &cancel,
+		Fn<void(crl::time, QImage)> cache) {
+	if (cancel && cancel->load()) {
+		return {};
+	}
 	const auto known = ranges::lower_bound(_positions, position);
 	if (known != end(_positions)
 		&& *known == _decodedPosition
@@ -398,7 +445,7 @@ QImage Extractor::take(crl::time position) {
 	auto has = false;
 	auto firstAt = crl::time(-1);
 	while (true) {
-		if (!receiveInto(_frame.get())) {
+		if (!receiveInto(_frame.get(), cancel)) {
 			break;
 		}
 		const auto at = FramePosition(_frame.get(), timeBase);
@@ -409,6 +456,7 @@ QImage Extractor::take(crl::time position) {
 			}
 		}
 		keepDecodedFrame(at);
+		cacheDecodedFrame(at, position, cache);
 		has = true;
 		av_frame_unref(_frame.get());
 		if (at < 0 || at >= position) {
@@ -418,7 +466,9 @@ QImage Extractor::take(crl::time position) {
 		}
 	}
 	const auto seeked = (behind || tooFarAhead);
-	if ((!has && seeked) || !FrameHasData(_kept.get())) {
+	if ((cancel && cancel->load())
+		|| (!has && seeked)
+		|| !FrameHasData(_kept.get())) {
 		return {};
 	}
 	return ConvertFrame(
@@ -494,9 +544,36 @@ struct FrameReader::Private {
 		return extractor && extractor->valid();
 	}
 
+	void cachePreview(crl::time position, QSize box, QImage image) {
+		if (image.isNull() || box.isEmpty()) {
+			return;
+		}
+		const auto bytes = image.sizeInBytes();
+		if (bytes > kMaxPreviewCacheBytes) {
+			return;
+		}
+		const auto lock = std::lock_guard(cacheMutex);
+		const auto existing = ranges::find_if(previews, [&](const auto &p) {
+			return p.position == position && p.box == box;
+		});
+		if (existing != end(previews)) {
+			previewBytes -= existing->image.sizeInBytes();
+			previews.erase(existing);
+		}
+		while (!previews.empty()
+			&& (previewBytes + bytes > kMaxPreviewCacheBytes
+				|| previews.size() >= kMaxPreviewCacheFrames)) {
+			previewBytes -= previews.front().image.sizeInBytes();
+			previews.erase(begin(previews));
+		}
+		previews.push_back({ position, box, std::move(image) });
+		previewBytes += bytes;
+	}
+
 	const QString path;
 	const QByteArray content;
 	std::mutex mutex;
+	std::mutex cacheMutex;
 	Source source;
 	ExtractRequest request;
 	std::unique_ptr<Extractor> extractor;
@@ -513,39 +590,56 @@ FrameReader::~FrameReader() = default;
 
 std::optional<crl::time> FrameReader::adjacentPosition(
 		crl::time position,
-		bool forward) {
+		bool forward,
+		QSize box,
+		const std::shared_ptr<std::atomic<bool>> &cancel) {
 	const auto lock = std::lock_guard(_private->mutex);
-	return _private->ensureOpen()
-		? _private->extractor->adjacentPosition(position, forward)
-		: std::nullopt;
+	if ((cancel && cancel->load()) || !_private->ensureOpen()) {
+		return std::nullopt;
+	}
+	_private->request.box = box;
+	auto cache = Fn<void(crl::time, QImage)>();
+	if (!forward && !box.isEmpty()) {
+		cache = [&](crl::time at, QImage image) {
+			_private->cachePreview(at, box, std::move(image));
+		};
+	}
+	return _private->extractor->adjacentPosition(position, forward, cancel, cache);
 }
 
-QImage FrameReader::frame(crl::time position, QSize box) {
-	const auto lock = std::lock_guard(_private->mutex);
+QImage FrameReader::cachedFrame(crl::time position, QSize box) {
+	const auto lock = std::lock_guard(_private->cacheMutex);
 	const auto cached = ranges::find_if(_private->previews, [&](const auto &p) {
 		return p.position == position && p.box == box;
 	});
-	if (cached != end(_private->previews)) {
-		return cached->image;
-	} else if (!_private->ensureOpen()) {
+	return (cached != end(_private->previews)) ? cached->image : QImage();
+}
+
+QImage FrameReader::frame(
+		crl::time position,
+		QSize box,
+		const std::shared_ptr<std::atomic<bool>> &cancel,
+		bool preloadPrevious) {
+	if (cancel && cancel->load()) {
+		return {};
+	}
+	auto cached = cachedFrame(position, box);
+	if (!cached.isNull()) {
+		return cached;
+	}
+	const auto lock = std::lock_guard(_private->mutex);
+	if ((cancel && cancel->load()) || !_private->ensureOpen()) {
 		return {};
 	}
 	_private->request.box = box;
-	auto result = _private->extractor->take(position);
-	if (!result.isNull() && !box.isEmpty()) {
-		const auto bytes = result.sizeInBytes();
-		if (bytes <= kMaxPreviewCacheBytes) {
-			auto &previews = _private->previews;
-			while (!previews.empty()
-				&& (_private->previewBytes + bytes > kMaxPreviewCacheBytes
-					|| previews.size() >= kMaxPreviewCacheFrames)) {
-				_private->previewBytes -= previews.front().image.sizeInBytes();
-				previews.erase(begin(previews));
-			}
-			previews.push_back({ position, box, result });
-			_private->previewBytes += bytes;
-		}
+	auto cache = Fn<void(crl::time, QImage)>();
+	if (preloadPrevious && !box.isEmpty()) {
+		cache = [&](crl::time at, QImage image) {
+			_private->cachePreview(at, box, std::move(image));
+		};
 	}
+	auto result = _private->extractor->take(position, cancel, cache);
+	_private->cachePreview(position, box, result);
 	return result;
 }
 

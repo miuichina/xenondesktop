@@ -59,6 +59,7 @@ public:
 	~VideoTimeline();
 
 	[[nodiscard]] QPoint coverDot() const;
+	[[nodiscard]] QImage previewFrame(crl::time position) const;
 
 private:
 	struct Loading {
