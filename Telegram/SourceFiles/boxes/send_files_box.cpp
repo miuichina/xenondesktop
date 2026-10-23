@@ -1509,7 +1509,8 @@ void SendFilesBox::sendFrame(int index) {
 				st::sendMediaPreviewSize);
 			list.overrideSendImagesAsPhotos = true;
 			const auto details = _sendMenuDetails();
-			_show->show(Box<SendFilesBox>(SendFilesBoxDescriptor{
+			const auto show = _show;
+			auto box = Box<SendFilesBox>(SendFilesBoxDescriptor{
 				.show = _show,
 				.list = std::move(list),
 				.caption = fieldText(),
@@ -1520,8 +1521,11 @@ void SendFilesBox::sendFrame(int index) {
 				.sendMenuDetails = [=] { return details; },
 				.stOverride = &_st,
 				.confirmed = _confirmedCallback,
+				.cancelled = _cancelledCallback,
 				.replyTo = _replyTo,
-			}), Ui::LayerOption::KeepOther);
+			});
+			_confirmed = true;
+			show->show(std::move(box), Ui::LayerOption::CloseOther);
 		}));
 }
 
