@@ -110,13 +110,19 @@ struct Source {
 	return 0;
 }
 
+[[nodiscard]] int64 StreamStart(not_null<const AVStream*> stream) {
+	return (stream->start_time != AV_NOPTS_VALUE) ? stream->start_time : 0;
+}
+
 [[nodiscard]] crl::time FramePosition(
 		not_null<AVFrame*> frame,
-		AVRational timeBase) {
+		not_null<const AVStream*> stream) {
 	const auto pts = (frame->best_effort_timestamp != AV_NOPTS_VALUE)
 		? frame->best_effort_timestamp
 		: frame->pts;
-	return (pts != AV_NOPTS_VALUE) ? PtsToTime(pts, timeBase) : -1;
+	return (pts != AV_NOPTS_VALUE)
+		? PtsToTime(pts - StreamStart(stream), stream->time_base)
+		: -1;
 }
 
 [[nodiscard]] QImage ConvertFrame(
@@ -204,7 +210,8 @@ public:
 	[[nodiscard]] QImage take(
 		crl::time position,
 		const std::shared_ptr<std::atomic<bool>> &cancel = nullptr,
-		Fn<void(crl::time, QImage)> cache = nullptr);
+		Fn<void(crl::time, QImage)> cache = nullptr,
+		bool exact = false);
 	[[nodiscard]] std::optional<crl::time> adjacentPosition(
 		crl::time position,
 		bool forward,
@@ -256,7 +263,7 @@ void Extractor::seekTo(crl::time position) {
 	const auto stream = _source.videoStream;
 	const auto target = TimeToPts(
 		std::max(position, crl::time(0)),
-		stream->time_base);
+		stream->time_base) + StreamStart(stream);
 	const auto seeked = av_seek_frame(
 		_source.format.get(),
 		_source.videoId,
@@ -266,7 +273,7 @@ void Extractor::seekTo(crl::time position) {
 		av_seek_frame(
 			_source.format.get(),
 			_source.videoId,
-			0,
+			StreamStart(stream),
 			AVSEEK_FLAG_BACKWARD);
 	}
 	avcodec_flush_buffers(_source.codec.get());
@@ -344,9 +351,21 @@ void Extractor::cacheDecodedFrame(
 		crl::time position,
 		crl::time target,
 		const Fn<void(crl::time, QImage)> &cache) {
-	if (cache
-		&& position >= std::max(target - kReversePreviewSpan, crl::time(0))
-		&& position < target) {
+	if (!cache || _request.box.isEmpty() || position >= target) {
+		return;
+	}
+	const auto stream = _source.videoStream;
+	const auto rate = (stream->avg_frame_rate.num > 0 && stream->avg_frame_rate.den > 0)
+		? stream->avg_frame_rate
+		: stream->r_frame_rate;
+	const auto bytes = int64(_request.box.width()) * _request.box.height() * 4;
+	const auto frames = std::max(kMaxPreviewCacheBytes / bytes - 1, int64(0));
+	const auto span = (rate.num > 0 && rate.den > 0)
+		? crl::time(std::min(
+			float64(kReversePreviewSpan),
+			1000. * frames * rate.den / rate.num))
+		: crl::time(0);
+	if (position >= std::max(target - span, crl::time(0))) {
 		cache(position, ConvertFrame(
 			_frame.get(),
 			_source.rotation,
@@ -380,12 +399,12 @@ std::optional<crl::time> Extractor::adjacentPosition(
 	if (!continuing) {
 		seekTo(std::max(position - 1, crl::time(0)));
 	}
-	const auto timeBase = _source.videoStream->time_base;
+	const auto stream = _source.videoStream;
 	auto previous = crl::time(-1);
 	auto beforePrevious = crl::time(-1);
 	auto selected = continuing ? selectedPosition : crl::time(-1);
 	while (receiveInto(_frame.get(), cancel)) {
-		const auto at = FramePosition(_frame.get(), timeBase);
+		const auto at = FramePosition(_frame.get(), stream);
 		keepDecodedFrame(at);
 		cacheDecodedFrame(at, position, cache);
 		av_frame_unref(_frame.get());
@@ -419,7 +438,8 @@ std::optional<crl::time> Extractor::adjacentPosition(
 QImage Extractor::take(
 		crl::time position,
 		const std::shared_ptr<std::atomic<bool>> &cancel,
-		Fn<void(crl::time, QImage)> cache) {
+		Fn<void(crl::time, QImage)> cache,
+		bool exact) {
 	if (cancel && cancel->load()) {
 		return {};
 	}
@@ -434,7 +454,7 @@ QImage Extractor::take(
 			_request.cover,
 			_scale);
 	}
-	const auto timeBase = _source.videoStream->time_base;
+	const auto stream = _source.videoStream;
 	const auto behind = (_decodedPosition < 0)
 		|| (position < _decodedPosition);
 	const auto tooFarAhead = !behind
@@ -448,7 +468,7 @@ QImage Extractor::take(
 		if (!receiveInto(_frame.get(), cancel)) {
 			break;
 		}
-		const auto at = FramePosition(_frame.get(), timeBase);
+		const auto at = FramePosition(_frame.get(), stream);
 		if (at >= 0) {
 			_decodedPosition = at;
 			if (firstAt < 0) {
@@ -461,7 +481,7 @@ QImage Extractor::take(
 		av_frame_unref(_frame.get());
 		if (at < 0 || at >= position) {
 			break;
-		} else if (firstAt >= 0 && at - firstAt > kMaxDecodeSpan) {
+		} else if (!exact && firstAt >= 0 && at - firstAt > kMaxDecodeSpan) {
 			break;
 		}
 	}
@@ -638,7 +658,7 @@ QImage FrameReader::frame(
 			_private->cachePreview(at, box, std::move(image));
 		};
 	}
-	auto result = _private->extractor->take(position, cancel, cache);
+	auto result = _private->extractor->take(position, cancel, cache, true);
 	_private->cachePreview(position, box, result);
 	return result;
 }

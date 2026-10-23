@@ -81,6 +81,8 @@ private:
 	void refreshCoverPreview();
 	void refreshFramePreview();
 	[[nodiscard]] QSize framePreviewBox() const;
+	void activateFramePreview(bool resetQuality);
+	void updateFramePreviewQuality(crl::time elapsed, bool completed);
 	void invalidateCoverPreview();
 	void togglePause();
 	void paintPlayBadge(QPainter &p);
@@ -135,6 +137,10 @@ private:
 	std::shared_ptr<std::atomic<bool>> _framePreviewCancel;
 	std::shared_ptr<std::atomic<bool>> _frameStepCancel;
 	int _frameStepKey = 0;
+	bool _framePreviewActive = false;
+	bool _reducedFramePreview = false;
+	int _fastFramePreviews = 0;
+	base::Timer _framePreviewIdleTimer;
 
 	QRect _frameRect;
 	QTransform _frameMatrix;

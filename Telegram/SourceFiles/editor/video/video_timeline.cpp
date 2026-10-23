@@ -95,23 +95,6 @@ VideoTimeline::~VideoTimeline() {
 	}
 }
 
-QImage VideoTimeline::previewFrame(crl::time position) const {
-	const auto count = int(_frames.frames.size());
-	if (!count || _frames.span <= 0) {
-		return {};
-	}
-	const auto ratio = (position - _frames.from) / float64(_frames.span);
-	const auto index = std::clamp(int(ratio * count), 0, count - 1);
-	for (auto offset = 0; offset != count; ++offset) {
-		for (const auto at : { index - offset, index + offset }) {
-			if (at >= 0 && at < count && !_frames.frames[at].isNull()) {
-				return _frames.frames[at];
-			}
-		}
-	}
-	return {};
-}
-
 QPoint VideoTimeline::coverDot() const {
 	return QPoint(
 		xAt(cover()),
