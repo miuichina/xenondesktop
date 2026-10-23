@@ -49,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/download_bar.h"
 #include "ui/controls/jump_down_button.h"
 #include "ui/controls/swipe_handler.h"
+#include "ui/arc_angles.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/screen_reader_mode.h"
@@ -115,6 +116,7 @@ namespace {
 constexpr auto kSearchPerPage = 50;
 constexpr auto kStoriesExpandDuration = crl::time(200);
 constexpr auto kSearchRequestDelay = crl::time(900);
+constexpr auto kUpdateProgressDuration = crl::time(180);
 
 base::options::toggle OptionForumHideChatsList({
 	.id = kOptionForumHideChatsList,
@@ -244,6 +246,7 @@ public:
 		bool hasTextIcon);
 
 	void setText(const QString &text);
+	void setProgress(float64 progress);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -259,6 +262,8 @@ private:
 	const style::icon &_iconOver;
 	const bool _hasTextIcon;
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _loading;
+	Ui::Animations::Simple _progressAnimation;
+	float64 _progress = -1.;
 
 	QImage _textIcon;
 
@@ -293,8 +298,26 @@ void Widget::BottomButton::setText(const QString &text) {
 	update();
 }
 
+void Widget::BottomButton::setProgress(float64 progress) {
+	if (_progress == progress) {
+		return;
+	}
+	const auto previous = _progressAnimation.value(_progress);
+	_progress = progress;
+	_progressAnimation.stop();
+	if (previous >= 0. && progress >= 0.) {
+		_progressAnimation.start(
+			[=] { radialAnimationCallback(); },
+			previous,
+			progress,
+			kUpdateProgressDuration,
+			anim::easeOutCubic);
+	}
+	update();
+}
+
 void Widget::BottomButton::radialAnimationCallback() {
-	if (!anim::Disabled() && width() < st::columnMinimalWidthLeft) {
+	if (width() < st::columnMinimalWidthLeft) {
 		update();
 	}
 }
@@ -372,12 +395,28 @@ void Widget::BottomButton::paintEvent(QPaintEvent *e) {
 			p.drawText(r, _text, style::al_top);
 		}
 	} else if (isDisabled() && _loading) {
-		_loading->draw(
-			p,
-			QPoint(
-				(width() - st::dialogsLoadMoreLoading.size.width()) / 2,
-				(height() - st::dialogsLoadMoreLoading.size.height()) / 2),
-			width());
+		const auto &loading = st::dialogsLoadMoreLoading;
+		const auto position = QPoint(
+			(width() - loading.size.width()) / 2,
+			(height() - loading.size.height()) / 2);
+		if (_progress >= 0.) {
+			const auto progress = _progressAnimation.value(_progress);
+			const auto length = int(base::SafeRound(
+				progress * arc::kFullLength));
+			auto pen = QPen(loading.color);
+			pen.setWidth(loading.thickness);
+			pen.setCapStyle(Qt::RoundCap);
+			p.setPen(pen);
+			Ui::DrawRadial(p, QRect(position, loading.size), {
+				.shown = 1.,
+				.arcFrom = arc::kQuarterLength - length,
+				.arcLength = length,
+				.material = true,
+				.progress = progress,
+			});
+		} else {
+			_loading->draw(p, position, width());
+		}
 	} else {
 		if (_hasTextIcon) {
 			const auto size = _textIcon.size() / style::DevicePixelRatio();
@@ -2709,9 +2748,14 @@ void Widget::checkUpdateStatus() {
 	using Checker = Core::UpdateChecker;
 	const auto checker = Checker();
 	const auto state = checker.state();
+	const auto total = checker.size();
+	const auto progress = (state == Checker::State::Download && total > 0)
+		? std::clamp(checker.already() / float64(total), 0., 1.)
+		: -1.;
 	if (state != Checker::State::None) {
 		if (_updateTelegram) {
 			_updateTelegram->setText(checker.statusText());
+			_updateTelegram->setProgress(progress);
 			_updateTelegram->setDisabled(state != Checker::State::Ready);
 			return;
 		}
@@ -2722,6 +2766,7 @@ void Widget::checkUpdateStatus() {
 			st::dialogsInstallUpdate,
 			st::dialogsInstallUpdateOver,
 			true);
+		_updateTelegram->setProgress(progress);
 		_updateTelegram->setDisabled(state != Checker::State::Ready);
 		_updateTelegram->show();
 		_updateTelegram->setClickedCallback([] {
