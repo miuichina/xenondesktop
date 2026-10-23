@@ -235,6 +235,8 @@ private:
 		Ui::SendFilesWay way,
 		bool silent = false) const;
 	void addMenuButton();
+	[[nodiscard]] bool canSendFrame(int index) const;
+	void sendFrame(int index);
 	void applyBlockChanges();
 	void toggleSpoilers(bool enabled);
 	void setSendLargePhotos(bool enabled);

@@ -48,6 +48,7 @@ struct VideoTimelineDescriptor {
 	crl::time cover = 0;
 
 	bool trimOnly = false;
+	bool frameOnly = false;
 };
 
 class VideoTimeline final : public TrimTimeline {

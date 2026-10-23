@@ -185,6 +185,7 @@ TrimTimeline::TrimTimeline(
 	: _duration)
 , _minDuration(std::min(descriptor.minDuration, _maxDuration))
 , _trimOnly(descriptor.trimOnly)
+, _frameOnly(descriptor.frameOnly)
 , _from(0)
 , _till(_maxDuration)
 , _cover(0)
@@ -225,6 +226,9 @@ int TrimTimeline::resizeGetHeight(int newWidth) {
 	if (_trimOnly) {
 		return playhead * 2 + st::videoTimelineTrimStripHeight;
 	}
+	if (_frameOnly) {
+		return playhead * 2 + st::videoTimelineStripHeight;
+	}
 	return st::videoTimelineLabelHeight
 		+ st::videoTimelineLabelSkip
 		+ st::videoTimelineStripHeight
@@ -245,8 +249,10 @@ QRect TrimTimeline::stripRect() const {
 			std::max(width() - handle * 2 - label, 1),
 			st::videoTimelineTrimStripHeight);
 	}
-	const auto top = st::videoTimelineLabelHeight
-		+ st::videoTimelineLabelSkip;
+	const auto top = _frameOnly
+		? (st::videoTimelinePlayheadOverflow
+			+ st::videoTimelinePlayheadOutline)
+		: (st::videoTimelineLabelHeight + st::videoTimelineLabelSkip);
 	return QRect(
 		handle,
 		top,
@@ -703,6 +709,9 @@ bool TrimTimeline::grabMovesSelection() const {
 TrimTimeline::Grab TrimTimeline::grabAt(
 		QPoint position,
 		Qt::KeyboardModifiers modifiers) const {
+	if (_frameOnly) {
+		return stripRect().contains(position) ? Grab::Head : Grab::None;
+	}
 	if (!_durationField && durationHitRect().contains(position)) {
 		return Grab::Label;
 	} else if (modifiers & (Qt::ShiftModifier | Qt::AltModifier)) {
@@ -1004,6 +1013,9 @@ void TrimTimeline::paintEvent(QPaintEvent *e) {
 }
 
 void TrimTimeline::paintSelection(QPainter &p, const QRect &strip) {
+	if (_frameOnly) {
+		return;
+	}
 	const auto left = xAt(_from);
 	const auto right = xAt(_till);
 	const auto radius = st::videoTimelineRadius;
@@ -1188,6 +1200,9 @@ void TrimTimeline::paintHead(QPainter &p, const QRect &strip) {
 }
 
 void TrimTimeline::paintDuration(QPainter &p) {
+	if (_frameOnly) {
+		return;
+	}
 	const auto label = durationLabel();
 	p.setFont(st::videoTimelineDurationStyle.font);
 	if (label.sizeShown) {

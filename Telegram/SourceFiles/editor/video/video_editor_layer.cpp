@@ -189,6 +189,50 @@ void PrepareProfileMediaFromFile(
 		crl::guard(parent, callback));
 }
 
+void ChooseVideoFrame(
+		not_null<QWidget*> parent,
+		std::shared_ptr<ChatHelpers::Show> show,
+		const Ui::PreparedFile &file,
+		Fn<void(QImage)> done) {
+	using VideoInfo = Ui::PreparedFileInformation::Video;
+	const auto video = file.information
+		? std::get_if<VideoInfo>(&file.information->media)
+		: nullptr;
+	if (!video || !file.canEditVideo() || video->thumbnail.isNull()) {
+		done({});
+		return;
+	}
+	const auto path = file.path;
+	const auto content = file.content;
+	const auto dimensions = video->thumbnail.size();
+	auto editor = base::make_unique_q<VideoEditor>(
+		parent,
+		VideoEditorDescriptor{
+			.path = path,
+			.content = content,
+			.dimensions = dimensions,
+			.duration = video->duration,
+			.data = VideoEditorData{ .frameOnly = true },
+			.initial = VideoModifications{
+				.cover = video->modifications.cover,
+			},
+		});
+	const auto raw = editor.get();
+	auto layer = std::make_unique<LayerWidget>(parent, std::move(editor));
+	InitVideoEditorLayer(layer.get(), raw, [=](VideoModifications mods) {
+		crl::async([=, ready = crl::guard(parent, done)] {
+			auto frame = Media::Video::ExtractFrame(
+				path,
+				content,
+				mods.cover);
+			crl::on_main([=, frame = std::move(frame)]() mutable {
+				ready(std::move(frame));
+			});
+		});
+	});
+	show->showLayer(std::move(layer), Ui::LayerOption::KeepOther);
+}
+
 void OpenWithPreparedVideoFile(
 		not_null<QWidget*> parent,
 		std::shared_ptr<ChatHelpers::Show> show,

@@ -203,6 +203,11 @@ VideoEditor::VideoEditor(
 		_dimensions,
 		_data.editor);
 
+	if (_data.frameOnly) {
+		_crop->hide();
+		_player->setPaused(true);
+	}
+
 	setupControls();
 	setupTimeline();
 	setupQuality();
@@ -249,6 +254,7 @@ void VideoEditor::setupTimeline() {
 			.from = _initial.from,
 			.till = _initial.till,
 			.cover = _initial.cover,
+			.frameOnly = _data.frameOnly,
 		});
 	_from = _timeline->from();
 	_till = _timeline->till();
@@ -288,7 +294,7 @@ void VideoEditor::setupTimeline() {
 }
 
 void VideoEditor::setupQuality() {
-	if (!_data.allowQuality) {
+	if (!_data.allowQuality || _data.frameOnly) {
 		return;
 	}
 	_quality = base::make_unique_q<VideoQualitySlider>(_controls.get());
@@ -301,6 +307,9 @@ void VideoEditor::setupQuality() {
 }
 
 void VideoEditor::setupSizeEstimate() {
+	if (_data.frameOnly) {
+		return;
+	}
 	const auto path = _path;
 	crl::async([=, weak = base::make_weak(this)] {
 		auto info = Media::Encode::ProbeSource(path);
@@ -356,13 +365,15 @@ void VideoEditor::setupControls() {
 		bar,
 		tr::lng_cancel(tr::now),
 		st::mediaviewCaptionFg);
-	_rotate = base::make_unique_q<Ui::IconButton>(
-		bar,
-		st::photoEditorRotateButton);
-	_flip = base::make_unique_q<Ui::IconButton>(
-		bar,
-		st::photoEditorFlipButton);
-	if (!_data.removeAudio) {
+	if (!_data.frameOnly) {
+		_rotate = base::make_unique_q<Ui::IconButton>(
+			bar,
+			st::photoEditorRotateButton);
+		_flip = base::make_unique_q<Ui::IconButton>(
+			bar,
+			st::photoEditorFlipButton);
+	}
+	if (!_data.removeAudio && !_data.frameOnly) {
 		// When the audio is dropped anyway there is nothing to choose.
 		_gifButton = base::make_unique_q<Ui::IconButton>(
 			bar,
@@ -485,21 +496,23 @@ void VideoEditor::setupControls() {
 		_about->setAttribute(Qt::WA_TransparentForMouseEvents);
 	}
 
-	_rotate->setClickedCallback([=] {
-		_geometry.angle += 90;
-		while (_geometry.angle >= 360) {
-			_geometry.angle -= 360;
-		}
-		applyGeometry();
-		refreshSizeEstimate();
-		invalidateCoverPreview();
-	});
-	_flip->setClickedCallback([=] {
-		_geometry.flipped = !_geometry.flipped;
-		applyGeometry();
-		refreshSizeEstimate();
-		invalidateCoverPreview();
-	});
+	if (_rotate) {
+		_rotate->setClickedCallback([=] {
+			_geometry.angle += 90;
+			while (_geometry.angle >= 360) {
+				_geometry.angle -= 360;
+			}
+			applyGeometry();
+			refreshSizeEstimate();
+			invalidateCoverPreview();
+		});
+		_flip->setClickedCallback([=] {
+			_geometry.flipped = !_geometry.flipped;
+			applyGeometry();
+			refreshSizeEstimate();
+			invalidateCoverPreview();
+		});
+	}
 	if (_gifButton) {
 		const auto refresh = [=] {
 			const auto icon = _gif
@@ -533,9 +546,15 @@ void VideoEditor::setupStreaming() {
 	}, lifetime());
 
 	_player->start();
+	if (_data.frameOnly) {
+		_player->restart(_cover);
+	}
 }
 
 void VideoEditor::setupTapToPause() {
+	if (_data.frameOnly) {
+		return;
+	}
 	struct State {
 		std::optional<QPoint> pressed;
 		bool moved = false;
@@ -585,6 +604,9 @@ void VideoEditor::invalidateCoverPreview() {
 }
 
 void VideoEditor::refreshCoverPreview() {
+	if (_data.frameOnly) {
+		return;
+	}
 	if (_bubbleBusy || _bubbleCover == _cover) {
 		return;
 	}
@@ -642,6 +664,9 @@ QSize VideoEditor::bubbleSize() const {
 }
 
 void VideoEditor::startCapture() {
+	if (_data.frameOnly) {
+		return;
+	}
 	if (!_capture || _bubblePreview.isNull() || captureFrom().isEmpty()) {
 		return;
 	}
@@ -668,6 +693,9 @@ void VideoEditor::startCapture() {
 }
 
 void VideoEditor::updateBubble() {
+	if (_data.frameOnly) {
+		return;
+	}
 	if (!_bubble || !_timeline) {
 		return;
 	}

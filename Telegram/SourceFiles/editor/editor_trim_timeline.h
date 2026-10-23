@@ -31,6 +31,7 @@ struct TrimTimelineDescriptor {
 	crl::time cover = 0;
 
 	bool trimOnly = false;
+	bool frameOnly = false;
 };
 
 class TrimTimeline
@@ -166,6 +167,7 @@ private:
 	const crl::time _maxDuration = 0;
 	const crl::time _minDuration = 0;
 	const bool _trimOnly = false;
+	const bool _frameOnly = false;
 
 	crl::time _from = 0;
 	crl::time _till = 0;

@@ -15,6 +15,7 @@ class Show;
 
 namespace Ui {
 struct PreparedList;
+struct PreparedFile;
 } // namespace Ui
 
 namespace Window {
@@ -55,6 +56,12 @@ void PrepareProfileMediaFromFile(
 	not_null<Window::Controller*> controller,
 	EditorData data,
 	Fn<void(ProfileMedia&&)> &&doneCallback);
+
+void ChooseVideoFrame(
+	not_null<QWidget*> parent,
+	std::shared_ptr<ChatHelpers::Show> show,
+	const Ui::PreparedFile &file,
+	Fn<void(QImage)> done);
 
 void OpenWithPreparedVideoFile(
 	not_null<QWidget*> parent,

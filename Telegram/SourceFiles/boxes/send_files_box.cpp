@@ -1481,9 +1481,56 @@ QImage SendFilesBox::preparePriceTagBg(QSize size) const {
 	return Images::Round(std::move(result), Images::CornersMask(radius));
 }
 
+bool SendFilesBox::canSendFrame(int index) const {
+	return (_limits & SendFilesAllow::Photos)
+		&& index >= 0
+		&& index < int(_list.files.size())
+		&& _list.files[index].information
+		&& _list.files[index].canEditVideo();
+}
+
+void SendFilesBox::sendFrame(int index) {
+	applyBlockChanges();
+	if (!canSendFrame(index)) {
+		return;
+	}
+	Editor::ChooseVideoFrame(
+		this,
+		_show,
+		_list.files[index],
+		crl::guard(this, [=](QImage frame) {
+			if (frame.isNull()) {
+				showToast(tr::lng_bad_video(tr::now));
+				return;
+			}
+			auto list = Storage::PrepareMediaFromImage(
+				std::move(frame),
+				QByteArray(),
+				st::sendMediaPreviewSize);
+			list.overrideSendImagesAsPhotos = true;
+			const auto details = _sendMenuDetails();
+			_show->show(Box<SendFilesBox>(SendFilesBoxDescriptor{
+				.show = _show,
+				.list = std::move(list),
+				.caption = fieldText(),
+				.toPeer = _toPeer,
+				.limits = _limits,
+				.check = _check,
+				.sendType = _sendType,
+				.sendMenuDetails = [=] { return details; },
+				.stOverride = &_st,
+				.confirmed = _confirmedCallback,
+				.replyTo = _replyTo,
+			}), Ui::LayerOption::KeepOther);
+		}));
+}
+
 void SendFilesBox::addMenuButton() {
 	const auto details = _sendMenuDetails();
-	if (!hasSendMenu(details) && !canArchiveAll() && !hasArchives()) {
+	if (!hasSendMenu(details)
+		&& !canArchiveAll()
+		&& !hasArchives()
+		&& !(_list.files.size() == 1 && canSendFrame(0))) {
 		return;
 	}
 
@@ -1493,6 +1540,12 @@ void SendFilesBox::addMenuButton() {
 		_menu = base::make_unique_q<Ui::PopupMenu>(top, tabbed.menu);
 		_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 		const auto position = QCursor::pos();
+		if (_list.files.size() == 1 && canSendFrame(0)) {
+			_menu->addAction(
+				tr::lng_context_send_frame(tr::now),
+				[=] { sendFrame(0); },
+				&st::menuIconPhoto);
+		}
 		if (canArchiveAll()) {
 			_menu->addAction(
 				tr::lng_folder_archive_pack(tr::now),
@@ -1886,6 +1939,12 @@ void SendFilesBox::pushBlock(int from, int till) {
 		state->menu->addAction(tr::lng_attach_replace(tr::now), [=] {
 			replaceAttachment(fileIndex);
 		}, &st::menuIconReplace);
+		if (canSendFrame(fileIndex)) {
+			state->menu->addAction(
+				tr::lng_context_send_frame(tr::now),
+				[=] { sendFrame(fileIndex); },
+				&st::menuIconPhoto);
+		}
 		const auto compressed = _sendWay.current().sendImagesAsPhotos();
 		const auto canOpenPhotoEditor = compressed
 			&& (file.type == Ui::PreparedFile::Type::Photo);

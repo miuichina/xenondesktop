@@ -32,6 +32,7 @@ constexpr auto kFrameWidthTolerance = 0.25;
 		.till = descriptor.till,
 		.cover = descriptor.cover,
 		.trimOnly = descriptor.trimOnly,
+		.frameOnly = descriptor.frameOnly,
 	};
 }
 

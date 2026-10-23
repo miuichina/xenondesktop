@@ -34,6 +34,7 @@ struct VideoEditorData {
 	float64 fpsLimit = 0.;
 	bool removeAudio = false;
 	bool allowQuality = false;
+	bool frameOnly = false;
 	bool webmSticker = false;
 	// Set when the file is re-encoded even with no modifications at all.
 	bool transcodeAlways = false;
