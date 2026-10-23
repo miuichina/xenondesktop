@@ -23,6 +23,10 @@ class RippleButton;
 class FlatLabel;
 } // namespace Ui
 
+namespace Media::Video {
+class FrameReader;
+} // namespace Media::Video
+
 namespace Editor {
 
 class Crop;
@@ -39,6 +43,7 @@ struct VideoEditorDescriptor {
 	VideoEditorData data;
 
 	VideoModifications initial;
+	std::shared_ptr<Media::Video::FrameReader> frameReader;
 };
 
 class VideoEditor final
@@ -73,6 +78,7 @@ private:
 	[[nodiscard]] QRect captureFrom() const;
 	[[nodiscard]] QSize bubbleSize() const;
 	void refreshCoverPreview();
+	void refreshFramePreview();
 	void invalidateCoverPreview();
 	void togglePause();
 	void paintPlayBadge(QPainter &p);
@@ -89,6 +95,7 @@ private:
 	const VideoEditorData _data;
 
 	const VideoModifications _initial;
+	const std::shared_ptr<Media::Video::FrameReader> _frameReader;
 
 	Media::Encode::SourceInfo _source;
 
@@ -116,6 +123,10 @@ private:
 	base::unique_qptr<Ui::RpWidget> _capture;
 	Ui::Animations::Simple _captureShown;
 	QImage _bubblePreview;
+	QImage _framePreview;
+	QSize _framePreviewBox;
+	crl::time _framePreviewAt = -1;
+	bool _framePreviewBusy = false;
 
 	QRect _frameRect;
 	QTransform _frameMatrix;

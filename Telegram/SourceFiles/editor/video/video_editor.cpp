@@ -180,6 +180,11 @@ VideoEditor::VideoEditor(
 , _duration(std::max(descriptor.duration, crl::time(1)))
 , _data(descriptor.data)
 , _initial(descriptor.initial)
+, _frameReader(descriptor.frameReader
+	? std::move(descriptor.frameReader)
+	: _data.frameOnly
+	? std::make_shared<Media::Video::FrameReader>(_path, _content)
+	: nullptr)
 , _player(std::make_unique<SegmentPlayer>(
 	_path,
 	_content,
@@ -260,9 +265,11 @@ void VideoEditor::setupTimeline() {
 	_from = _timeline->from();
 	_till = _timeline->till();
 	_cover = _timeline->cover();
-	_seeker = std::make_unique<TimelineSeeker>(
-		_timeline.get(),
-		_player.get());
+	if (!_data.frameOnly) {
+		_seeker = std::make_unique<TimelineSeeker>(
+			_timeline.get(),
+			_player.get());
+	}
 
 	_timeline->trimChanges(
 	) | rpl::on_next([=] {
@@ -537,6 +544,9 @@ void VideoEditor::setupControls() {
 }
 
 void VideoEditor::setupStreaming() {
+	if (_data.frameOnly) {
+		return;
+	}
 	_player->repaints(
 	) | rpl::on_next([=] {
 		update();
@@ -546,9 +556,6 @@ void VideoEditor::setupStreaming() {
 	}, lifetime());
 
 	_player->start();
-	if (_data.frameOnly) {
-		_player->restart(_cover);
-	}
 }
 
 void VideoEditor::setupTapToPause() {
@@ -605,6 +612,7 @@ void VideoEditor::invalidateCoverPreview() {
 
 void VideoEditor::refreshCoverPreview() {
 	if (_data.frameOnly) {
+		refreshFramePreview();
 		return;
 	}
 	if (_bubbleBusy || _bubbleCover == _cover) {
@@ -640,6 +648,35 @@ void VideoEditor::refreshCoverPreview() {
 				updateBubble();
 			}
 			refreshCoverPreview();
+		});
+	});
+}
+
+void VideoEditor::refreshFramePreview() {
+	if (!_frameReader || _framePreviewBusy || _frameRect.isEmpty()) {
+		return;
+	}
+	const auto position = _cover;
+	const auto box = _frameRect.size() * style::DevicePixelRatio();
+	if (_framePreviewAt == position && _framePreviewBox == box) {
+		return;
+	}
+	_framePreviewBusy = true;
+	const auto reader = _frameReader;
+	crl::async([=, weak = base::make_weak(this)] {
+		auto preview = reader->frame(position, box);
+		crl::on_main(weak, [=, preview = std::move(preview)]() mutable {
+			_framePreviewBusy = false;
+			const auto currentBox = _frameRect.size() * style::DevicePixelRatio();
+			if (_cover != position || currentBox != box) {
+				refreshFramePreview();
+				return;
+			} else if (!preview.isNull()) {
+				_framePreview = std::move(preview);
+				_framePreviewAt = position;
+				_framePreviewBox = box;
+				update();
+			}
 		});
 	});
 }
@@ -864,6 +901,9 @@ void VideoEditor::applyGeometry() {
 		_about->move(margin.left(), margin.top());
 	}
 
+	if (_data.frameOnly) {
+		refreshFramePreview();
+	}
 	update();
 }
 
@@ -871,7 +911,9 @@ void VideoEditor::paint(QPainter &p) {
 	if (_frameRect.isEmpty()) {
 		return;
 	}
-	const auto frame = _player->frame(_frameRect.size());
+	const auto frame = _data.frameOnly
+		? _framePreview
+		: _player->frame(_frameRect.size());
 	if (frame.isNull()) {
 		return;
 	}
@@ -906,7 +948,7 @@ void VideoEditor::paintPlayBadge(QPainter &p) {
 void VideoEditor::keyPressEvent(QKeyEvent *e) {
 	const auto key = e->key();
 	if (_data.frameOnly && (key == Qt::Key_Left || key == Qt::Key_Right)) {
-		if (!_confirmAfterFrameStep) {
+		if (!_confirmAfterFrameStep && (!e->isAutoRepeat() || !_steppingFrame)) {
 			stepFrame((key == Qt::Key_Right) ? 1 : -1);
 		}
 		e->accept();
@@ -920,6 +962,9 @@ void VideoEditor::keyPressEvent(QKeyEvent *e) {
 }
 
 void VideoEditor::stepFrame(int direction) {
+	if (!_frameReader || _frameRect.isEmpty()) {
+		return;
+	}
 	if (direction) {
 		_pendingFrameSteps.push_back(direction > 0);
 	}
@@ -930,18 +975,23 @@ void VideoEditor::stepFrame(int direction) {
 	_pendingFrameSteps.pop_front();
 	_steppingFrame = true;
 	const auto position = _timeline->cover();
-	const auto path = _path;
-	const auto content = _content;
+	const auto reader = _frameReader;
+	const auto box = _frameRect.size() * style::DevicePixelRatio();
 	crl::async([=, weak = base::make_weak(this)] {
-		const auto next = Media::Video::AdjacentFramePosition(
-			path,
-			content,
-			position,
-			forward);
-		crl::on_main(weak, [=] {
+		const auto next = reader->adjacentPosition(position, forward);
+		auto preview = next ? reader->frame(*next, box) : QImage();
+		crl::on_main(weak, [=, preview = std::move(preview)]() mutable {
 			_steppingFrame = false;
 			if (next && _timeline->cover() == position) {
+				if (!preview.isNull()
+					&& box == _frameRect.size() * style::DevicePixelRatio()) {
+					_framePreview = std::move(preview);
+					_framePreviewAt = *next;
+					_framePreviewBox = box;
+				}
 				_timeline->setCoverPosition(*next);
+				refreshFramePreview();
+				update();
 			}
 			if (!_pendingFrameSteps.empty()) {
 				stepFrame(0);

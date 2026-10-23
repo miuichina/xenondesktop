@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <memory>
 #include <optional>
 
 namespace Media::Video {
@@ -38,11 +39,21 @@ void ExtractFrames(
 	const ExtractRequest &request,
 	ExtractCallback callback);
 
-[[nodiscard]] std::optional<crl::time> AdjacentFramePosition(
-	const QString &path,
-	const QByteArray &content,
-	crl::time position,
-	bool forward);
+class FrameReader final {
+public:
+	FrameReader(QString path, QByteArray content);
+	~FrameReader();
+
+	[[nodiscard]] std::optional<crl::time> adjacentPosition(
+		crl::time position,
+		bool forward);
+	[[nodiscard]] QImage frame(crl::time position, QSize box = QSize());
+
+private:
+	struct Private;
+	const std::unique_ptr<Private> _private;
+
+};
 
 [[nodiscard]] QImage ExtractFrame(
 	const QString &path,

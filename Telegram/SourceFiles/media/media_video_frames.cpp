@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ffmpeg/ffmpeg_bytes_io_wrap.h"
 #include "ffmpeg/ffmpeg_utility.h"
 
+#include <mutex>
+
 namespace Media::Video {
 namespace {
 
@@ -18,6 +20,9 @@ using namespace FFmpeg;
 constexpr auto kMaxDecodeSpan = crl::time(10000);
 constexpr auto kForwardDecodeWindow = crl::time(3000);
 constexpr auto kMaxDecodeArea = 4096 * int64(4096);
+constexpr auto kMaxPositionCache = 2048;
+constexpr auto kMaxPreviewCacheBytes = int64(64) * 1024 * 1024;
+constexpr auto kMaxPreviewCacheFrames = 16;
 
 struct Source {
 	ReadFileWrap fileWrap;
@@ -203,6 +208,7 @@ public:
 private:
 	[[nodiscard]] bool receiveInto(not_null<AVFrame*> frame);
 	void seekTo(crl::time position);
+	void keepDecodedFrame(crl::time position);
 
 	Source &_source;
 	const ExtractRequest &_request;
@@ -210,6 +216,7 @@ private:
 	FramePointer _kept;
 	SwscalePointer _scale;
 	AVPacket *_packet = nullptr;
+	std::vector<crl::time> _positions;
 	crl::time _decodedPosition = -1;
 	bool _finished = false;
 
@@ -252,6 +259,8 @@ void Extractor::seekTo(crl::time position) {
 	}
 	avcodec_flush_buffers(_source.codec.get());
 	_decodedPosition = -1;
+	_positions.clear();
+	av_frame_unref(_kept.get());
 	_finished = false;
 }
 
@@ -297,17 +306,49 @@ bool Extractor::receiveInto(not_null<AVFrame*> frame) {
 	}
 }
 
+void Extractor::keepDecodedFrame(crl::time position) {
+	av_frame_unref(_kept.get());
+	av_frame_ref(_kept.get(), _frame.get());
+	_decodedPosition = position;
+	if (position < 0) {
+		return;
+	} else if (!_positions.empty() && position < _positions.back()) {
+		_positions.clear();
+	}
+	if (_positions.empty() || position > _positions.back()) {
+		_positions.push_back(position);
+		if (_positions.size() > kMaxPositionCache) {
+			_positions.erase(begin(_positions));
+		}
+	}
+}
+
 std::optional<crl::time> Extractor::adjacentPosition(
 		crl::time position,
 		bool forward) {
 	position = std::max(position, crl::time(0));
-	seekTo(std::max(position - 1, crl::time(0)));
+	const auto current = ranges::lower_bound(_positions, position);
+	if (current != end(_positions)) {
+		if (forward && std::next(current) != end(_positions)) {
+			return *std::next(current);
+		} else if (!forward && current != begin(_positions)) {
+			return *std::prev(current);
+		}
+	}
+	const auto selectedPosition = (current != end(_positions))
+		? *current
+		: position;
+	const auto continuing = forward && (_decodedPosition == selectedPosition);
+	if (!continuing) {
+		seekTo(std::max(position - 1, crl::time(0)));
+	}
 	const auto timeBase = _source.videoStream->time_base;
 	auto previous = crl::time(-1);
 	auto beforePrevious = crl::time(-1);
-	auto selected = crl::time(-1);
+	auto selected = continuing ? selectedPosition : crl::time(-1);
 	while (receiveInto(_frame.get())) {
 		const auto at = FramePosition(_frame.get(), timeBase);
+		keepDecodedFrame(at);
 		av_frame_unref(_frame.get());
 		if (at < 0) {
 			continue;
@@ -335,6 +376,17 @@ std::optional<crl::time> Extractor::adjacentPosition(
 }
 
 QImage Extractor::take(crl::time position) {
+	const auto known = ranges::lower_bound(_positions, position);
+	if (known != end(_positions)
+		&& *known == _decodedPosition
+		&& FrameHasData(_kept.get())) {
+		return ConvertFrame(
+			_kept.get(),
+			_source.rotation,
+			_request.box,
+			_request.cover,
+			_scale);
+	}
 	const auto timeBase = _source.videoStream->time_base;
 	const auto behind = (_decodedPosition < 0)
 		|| (position < _decodedPosition);
@@ -356,8 +408,7 @@ QImage Extractor::take(crl::time position) {
 				firstAt = at;
 			}
 		}
-		av_frame_unref(_kept.get());
-		av_frame_ref(_kept.get(), _frame.get());
+		keepDecodedFrame(at);
 		has = true;
 		av_frame_unref(_frame.get());
 		if (at < 0 || at >= position) {
@@ -421,20 +472,81 @@ void ExtractFrames(
 	}
 }
 
-std::optional<crl::time> AdjacentFramePosition(
-		const QString &path,
-		const QByteArray &content,
+struct FrameReader::Private {
+	struct Preview {
+		crl::time position = 0;
+		QSize box;
+		QImage image;
+	};
+
+	Private(QString path, QByteArray content)
+	: path(std::move(path))
+	, content(std::move(content)) {
+	}
+
+	[[nodiscard]] bool ensureOpen() {
+		if (!attempted) {
+			attempted = true;
+			if (OpenSource(source, path, content, true)) {
+				extractor = std::make_unique<Extractor>(source, request);
+			}
+		}
+		return extractor && extractor->valid();
+	}
+
+	const QString path;
+	const QByteArray content;
+	std::mutex mutex;
+	Source source;
+	ExtractRequest request;
+	std::unique_ptr<Extractor> extractor;
+	std::vector<Preview> previews;
+	int64 previewBytes = 0;
+	bool attempted = false;
+};
+
+FrameReader::FrameReader(QString path, QByteArray content)
+: _private(std::make_unique<Private>(std::move(path), std::move(content))) {
+}
+
+FrameReader::~FrameReader() = default;
+
+std::optional<crl::time> FrameReader::adjacentPosition(
 		crl::time position,
 		bool forward) {
-	auto source = Source();
-	if (!OpenSource(source, path, content, true)) {
-		return std::nullopt;
-	}
-	const auto request = ExtractRequest();
-	auto extractor = Extractor(source, request);
-	return extractor.valid()
-		? extractor.adjacentPosition(position, forward)
+	const auto lock = std::lock_guard(_private->mutex);
+	return _private->ensureOpen()
+		? _private->extractor->adjacentPosition(position, forward)
 		: std::nullopt;
+}
+
+QImage FrameReader::frame(crl::time position, QSize box) {
+	const auto lock = std::lock_guard(_private->mutex);
+	const auto cached = ranges::find_if(_private->previews, [&](const auto &p) {
+		return p.position == position && p.box == box;
+	});
+	if (cached != end(_private->previews)) {
+		return cached->image;
+	} else if (!_private->ensureOpen()) {
+		return {};
+	}
+	_private->request.box = box;
+	auto result = _private->extractor->take(position);
+	if (!result.isNull() && !box.isEmpty()) {
+		const auto bytes = result.sizeInBytes();
+		if (bytes <= kMaxPreviewCacheBytes) {
+			auto &previews = _private->previews;
+			while (!previews.empty()
+				&& (_private->previewBytes + bytes > kMaxPreviewCacheBytes
+					|| previews.size() >= kMaxPreviewCacheFrames)) {
+				_private->previewBytes -= previews.front().image.sizeInBytes();
+				previews.erase(begin(previews));
+			}
+			previews.push_back({ position, box, result });
+			_private->previewBytes += bytes;
+		}
+	}
+	return result;
 }
 
 QImage ExtractFrame(
