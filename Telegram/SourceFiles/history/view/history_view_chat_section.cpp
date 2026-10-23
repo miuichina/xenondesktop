@@ -3530,7 +3530,7 @@ void ChatWidget::sendInlineResult(
 				Api::MessageToSend(prepareSendAction(options)),
 				std::nullopt)) {
 			_composeControls->clear();
-			finishSending();
+			finishSending(options);
 		}
 		return;
 	}
