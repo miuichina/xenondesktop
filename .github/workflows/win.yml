@@ -111,6 +111,11 @@ jobs:
         shell: pwsh
         run: |
           $prepare = "$env:SOURCE_ROOT\Telegram\build\prepare\win.bat"
+          $qtPatches = "$env:BUILD_ROOT\Libraries\win64\qt6_windows7"
+          if (!(Get-ChildItem -LiteralPath $qtPatches -Filter '*.patch' -File -ErrorAction SilentlyContinue)) {
+            & $prepare silent qt6 qt6_windows7 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\qt-patches-cache-repair.log"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
           $rust = "$env:BUILD_ROOT\Libraries\win64\tdesktop_rust"
           if ((Test-Path "$rust\out\lib\tdesktop_rust.lib") -and !(Test-Path "$rust\out\src\wallet_engine\wallet_engine.cpp")) {
             & $prepare silent qt6 tlottie wallet-engine tdesktop_rust 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\cache-repair.log"
@@ -126,7 +131,7 @@ jobs:
           $root = (Resolve-Path "$env:BUILD_ROOT\Libraries").Path
           $files = Get-ChildItem -LiteralPath $root -File -Recurse -Force
           foreach ($file in $files) {
-            if ($file.FullName -match '\\tdesktop_rust\\out\\' -or $file.Extension -match '^\.(lib|a|exe|h|hpp|inc|cmake|pc)$' -or $file.FullName -match '\\(include|objects-[^\\]+|cache_keys|patches|nv-codec-headers)\\') { continue }
+            if ($file.FullName -match '\\tdesktop_rust\\out\\' -or $file.Extension -match '^\.(lib|a|exe|h|hpp|inc|cmake|pc|patch)$' -or $file.FullName -match '\\(include|objects-[^\\]+|cache_keys|patches|nv-codec-headers)\\') { continue }
             if (!$file.FullName.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected cleanup path' }
             Remove-Item -LiteralPath $file.FullName -Force
           }
