@@ -1483,6 +1483,7 @@ QImage SendFilesBox::preparePriceTagBg(QSize size) const {
 
 bool SendFilesBox::canSendFrame(int index) const {
 	return (_limits & SendFilesAllow::Photos)
+		&& !_preparing
 		&& index >= 0
 		&& index < int(_list.files.size())
 		&& _list.files[index].information
@@ -1508,21 +1509,54 @@ void SendFilesBox::sendFrame(int index) {
 				QByteArray(),
 				st::sendMediaPreviewSize);
 			list.overrideSendImagesAsPhotos = true;
+			applyBlockChanges();
 			const auto details = _sendMenuDetails();
 			const auto show = _show;
+			const auto way = _sendWay.current();
+			const auto price = _price.current();
+			const auto invertCaption = _invertCaption;
+			const auto stashCheck = _stashCheck;
+			const auto stashCallback = _stashCallback;
+			const auto saved = std::make_shared<SendFilesBoxDescriptor>(
+				SendFilesBoxDescriptor{
+					.show = show,
+					.list = std::move(_list),
+					.caption = fieldText(),
+					.toPeer = _toPeer,
+					.limits = _limits,
+					.check = _check,
+					.sendType = _sendType,
+					.sendMenuDetails = [=] { return details; },
+					.stOverride = &_st,
+					.confirmed = _confirmedCallback,
+					.cancelled = _cancelledCallback,
+					.replyTo = _replyTo,
+				});
+			saved->list.overrideSendImagesAsPhotos = way.sendImagesAsPhotos();
+			const auto restore = crl::guard(&show->session(), [=] {
+				if (!show->valid() || saved->list.files.empty()) {
+					return;
+				}
+				auto box = Box<SendFilesBox>(std::move(*saved));
+				box->_initialSendWay = way;
+				box->_price = price;
+				box->_invertCaption = invertCaption;
+				box->setStashCallbacks(stashCheck, stashCallback);
+				show->show(std::move(box), Ui::LayerOption::CloseOther);
+			});
 			auto box = Box<SendFilesBox>(SendFilesBoxDescriptor{
-				.show = _show,
+				.show = show,
 				.list = std::move(list),
-				.caption = fieldText(),
-				.toPeer = _toPeer,
-				.limits = _limits,
-				.check = _check,
-				.sendType = _sendType,
-				.sendMenuDetails = [=] { return details; },
-				.stOverride = &_st,
-				.confirmed = _confirmedCallback,
-				.cancelled = _cancelledCallback,
-				.replyTo = _replyTo,
+				.caption = saved->caption,
+				.toPeer = saved->toPeer,
+				.limits = saved->limits,
+				.check = saved->check,
+				.sendType = saved->sendType,
+				.sendMenuDetails = saved->sendMenuDetails,
+				.stOverride = saved->stOverride,
+				.confirmed = saved->confirmed,
+				.cancelled = [=] { crl::on_main(restore); },
+				.replyTo = saved->replyTo,
 			});
 			_confirmed = true;
 			show->show(std::move(box), Ui::LayerOption::CloseOther);
@@ -1580,7 +1614,8 @@ void SendFilesBox::addMenuButton() {
 
 void SendFilesBox::initSendWay() {
 	_sendWay = [&] {
-		auto result = Core::App().settings().sendFilesWay();
+		auto result = _initialSendWay.value_or(
+			Core::App().settings().sendFilesWay());
 		result.setHasCompressedStickers(_list.hasSticker());
 		if ((_limits & SendFilesAllow::OnlyOne)
 			&& (_list.files.size() > 1)) {
