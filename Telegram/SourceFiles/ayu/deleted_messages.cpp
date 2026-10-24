@@ -127,7 +127,7 @@ bool PrependPseudoReply(not_null<Main::Session*> session,
 
 bool SaveDeletedMessages() {
 	return Core::App().settings().readPref<bool>("xenon-save-deleted-messages",
-		true);
+		false);
 }
 
 bool SaveForBots() {

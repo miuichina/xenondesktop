@@ -1517,9 +1517,7 @@ QSize OverlayWidget::videoSize() const {
 }
 
 bool OverlayWidget::streamingRequiresControls() const {
-	return !_stories
-		&& _document
-		&& (!_document->isAnimation() || _document->isVideoMessage());
+	return !_stories && _document;
 }
 
 QImage OverlayWidget::videoFrame() const {
