@@ -91,7 +91,6 @@ public:
 
 private:
 	void createGame(not_null<Main::Session*> session);
-	QSize thumbBox() const;
 	MTPWebDocument adjustAttributes(const MTPWebDocument &document);
 	MTPVector<MTPDocumentAttribute> adjustAttributes(
 		const MTPVector<MTPDocumentAttribute> &document,
@@ -110,6 +109,7 @@ private:
 		Geo,
 		Venue,
 		Game,
+		Widget,
 	};
 
 	friend class internal::SendData;

@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "storage/storage_folder_archive.h"
 #include "storage/storage_media_prepare.h"
-#include "iv/iv_instance.h"
 #include "mainwidget.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
@@ -32,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_characters_limit.h"
 #include "history/view/controls/history_view_compose_ai_button.h"
 #include "history/view/history_view_schedule_box.h"
+#include "core/click_handler_types.h"
 #include "core/mime_type.h"
 #include "core/shortcuts.h"
 #include "core/ui_integration.h"
@@ -336,9 +336,12 @@ void EditPriceBox(
 			st::paidAmountAbout),
 		st::boxRowPadding + QMargins(0, st::sendMediaRowSkip, 0, 0));
 	about->setClickHandlerFilter([=](const auto &...) {
-		Core::App().iv().openWithIvPreferred(
+		HiddenUrlClickHandler::OpenTranslatedWithIv(
 			session,
-			tr::lng_paid_about_link_url(tr::now));
+			tr::lng_paid_about_link_url,
+			QVariant::fromValue(ClickHandlerContext{
+				.show = box->uiShow(),
+			}));
 		return false;
 	});
 
@@ -1692,11 +1695,14 @@ void SendFilesBox::generatePreviewFrom(int fromBlock) {
 	auto albumStart = -1;
 	for (auto i = fromItem, till = int(_list.files.size()); i != till; ++i) {
 		const auto type = _list.files[i].type;
+		// A video turned into a GIF leaves the album when it is sent.
+		const auto separate = _list.files[i].sendsVideoAsGif();
 		if (albumStart >= 0) {
 			const auto albumCount = (i - albumStart);
 			if ((type == Type::File)
 				|| (type == Type::None)
 				|| (type == Type::Music)
+				|| separate
 				|| (albumCount == Ui::MaxAlbumItems())) {
 				pushBlock(std::exchange(albumStart, -1), i);
 			} else {
@@ -1705,7 +1711,8 @@ void SendFilesBox::generatePreviewFrom(int fromBlock) {
 		}
 		if (type != Type::File
 			&& type != Type::Music
-			&& type != Type::None) {
+			&& type != Type::None
+			&& !separate) {
 			if (albumStart < 0) {
 				albumStart = i;
 			}

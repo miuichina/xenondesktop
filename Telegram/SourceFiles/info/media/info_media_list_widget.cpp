@@ -251,7 +251,8 @@ void ListWidget::start() {
 			session().data().itemVisibilityQueries(
 			) | rpl::filter([=](
 					const Data::Session::ItemVisibilityQuery &query) {
-				return _provider->isPossiblyMyItem(query.item)
+				return !query.view
+					&& _provider->isPossiblyMyItem(query.item)
 					&& isVisible();
 			}) | rpl::on_next([=](
 					const Data::Session::ItemVisibilityQuery &query) {
@@ -384,11 +385,6 @@ std::optional<int> ListWidget::fullCount() const {
 
 rpl::producer<std::optional<int>> ListWidget::fullCountValue() const {
 	return _fullCountUpdates.events_starting_with(fullCount());
-}
-
-auto ListWidget::globalMediaSliceView() const
--> const std::optional<GlobalMediaSliceView> & {
-	return _globalMediaSliceView;
 }
 
 auto ListWidget::globalMediaSliceViewValue() const

@@ -5,7 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#ifdef _DEBUG
+#if defined _DEBUG || defined TDESKTOP_RELEASE_TEST_HARNESS
 
 #include "test/test_runner.h"
 
@@ -141,7 +141,7 @@ void StartChatsLoadedWait(
 		return;
 	}
 	Core::App().domain().activeSessionValue(
-	) | rpl::map([](Main::Session *session) {
+	) | rpl::map([](Main::Session *session) -> rpl::producer<Data::Folder*> {
 		if (!session) {
 			return rpl::never<Data::Folder*>();
 		}
@@ -235,9 +235,59 @@ void CompleteAfterSessionDrain(not_null<Runner*> runner, crl::time left) {
 	});
 }
 
+// The first non-empty answer of |gates|, outermost first, else |own|: once
+// a gate refuses, later gates and |own| are not called.
+[[nodiscard]] Fn<QString()> InheritedSkipReason(
+		std::vector<Fn<QString()>> gates,
+		Fn<QString()> own) {
+	return [gates = std::move(gates), own = std::move(own)] {
+		for (const auto &gate : gates) {
+			auto reason = gate();
+			if (!reason.isEmpty()) {
+				return reason;
+			}
+		}
+		return own ? own() : QString();
+	};
+}
+
+[[nodiscard]] std::vector<Fn<bool(not_null<Runner*>)>> &ScenarioProviders() {
+	static auto result = std::vector<Fn<bool(not_null<Runner*>)>>();
+	return result;
+}
+
 } // namespace
 
+void RegisterScenarioProvider(Fn<bool(not_null<Runner*>)> provider) {
+	ScenarioProviders().push_back(std::move(provider));
+}
+
 void Runner::add(Stage stage) {
+	Expects(!_started);
+
+	if (!_inheritedGates.empty()) {
+		stage.skipReason = InheritedSkipReason(
+			_inheritedGates,
+			std::move(stage.skipReason));
+	}
+	_stages.push_back(std::move(stage));
+}
+
+void Runner::addGated(Fn<QString()> gate, Fn<void()> compose) {
+	Expects(!_started && gate && compose);
+
+	const auto first = std::make_shared<QString>();
+	_inheritedGates.push_back([=] {
+		if (first->isEmpty()) {
+			*first = gate();
+		}
+		return *first;
+	});
+	compose();
+	_inheritedGates.pop_back();
+}
+
+void Runner::addRecovery(Stage stage) {
 	Expects(!_started);
 
 	_stages.push_back(std::move(stage));
@@ -516,7 +566,13 @@ void Start() {
 	}
 	Started = true;
 	static auto runner = Runner();
-	SetupScenario(&runner);
+	const auto provided = ranges::any_of(ScenarioProviders(), [](
+			const Fn<bool(not_null<Runner*>)> &provider) {
+		return provider(&runner);
+	});
+	if (!provided) {
+		SetupScenario(&runner);
+	}
 	if (runner.empty()) {
 		Note(u"no scenario registered"_q);
 		return;
@@ -625,7 +681,7 @@ void AppendFinishReleaseSelfTest(
 
 } // namespace Test
 
-#else // _DEBUG
+#else // _DEBUG || TDESKTOP_RELEASE_TEST_HARNESS
 
 #include "test/test_agent.h"
 
@@ -636,4 +692,4 @@ void Start() {
 
 } // namespace Test
 
-#endif // _DEBUG
+#endif // _DEBUG || TDESKTOP_RELEASE_TEST_HARNESS

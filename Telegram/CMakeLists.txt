@@ -60,6 +60,10 @@ include(cmake/lib_tgcalls.cmake)
 include(cmake/lib_prisma.cmake)
 include(cmake/lib_fido2.cmake)
 include(cmake/lib_zxcvbn.cmake)
+include(cmake/lib_litehtml.cmake)
+include(cmake/lib_quickjs.cmake)
+include(cmake/lib_widget_renderer.cmake)
+include(cmake/lib_widget_sandbox.cmake)
 include(cmake/td_export.cmake)
 include(cmake/td_gram.cmake)
 include(cmake/td_iv.cmake)
@@ -100,12 +104,18 @@ if (DESKTOP_APP_TEST_APPS OR TDESKTOP_BUILD_UPDATE_TESTS)
         endif()
     endif()
 endif()
+include(cmake/test_iv_editor_table_grid.cmake)
+include(cmake/test_wallet_phrase_shares.cmake)
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
 target_link_libraries(Telegram
 PRIVATE
     tdesktop::lib_fido2
+    tdesktop::lib_litehtml
+    tdesktop::lib_quickjs
+    tdesktop::lib_widget_renderer
+    tdesktop::lib_widget_sandbox
     tdesktop::lib_tgcalls
     tdesktop::td_export
     tdesktop::td_gram
@@ -570,6 +580,8 @@ PRIVATE
     chat_helpers/share_message_phrase_factory.h
     chat_helpers/spellchecker_common.cpp
     chat_helpers/spellchecker_common.h
+    chat_helpers/spellchecker_locale_ids.cpp
+    chat_helpers/spellchecker_locale_ids.h
     chat_helpers/stickers_dice_pack.cpp
     chat_helpers/stickers_dice_pack.h
     chat_helpers/stickers_emoji_pack.cpp
@@ -638,6 +650,7 @@ PRIVATE
     core/local_url_handlers.h
     core/phone_click_handler.cpp
     core/phone_click_handler.h
+    core/private_temp_directory.h
     core/sandbox.cpp
     core/sandbox.h
     core/shortcuts.cpp
@@ -1032,6 +1045,8 @@ PRIVATE
     history/view/controls/history_view_draft_options.h
     history/view/controls/history_view_forward_panel.cpp
     history/view/controls/history_view_forward_panel.h
+    history/view/controls/history_view_bot_menu_hold.cpp
+    history/view/controls/history_view_bot_menu_hold.h
     history/view/controls/history_view_rich_draft_preview.cpp
     history/view/controls/history_view_rich_draft_preview.h
     history/view/controls/history_view_suggest_options.cpp
@@ -1070,6 +1085,8 @@ PRIVATE
     history/view/media/history_view_giveaway.h
     history/view/media/history_view_gram_transfer.cpp
     history/view/media/history_view_gram_transfer.h
+    history/view/media/history_view_html_widget.cpp
+    history/view/media/history_view_html_widget.h
     history/view/media/history_view_invoice.cpp
     history/view/media/history_view_invoice.h
     history/view/media/history_view_large_emoji.cpp
@@ -1123,6 +1140,8 @@ PRIVATE
     history/view/media/history_view_unique_gift.h
     history/view/media/history_view_unsupported_notice.cpp
     history/view/media/history_view_unsupported_notice.h
+    history/view/media/history_view_unsupported_widget.cpp
+    history/view/media/history_view_unsupported_widget.h
     history/view/media/history_view_userpic_suggestion.cpp
     history/view/media/history_view_userpic_suggestion.h
     history/view/media/history_view_video_message_seek.cpp
@@ -1153,6 +1172,7 @@ PRIVATE
     history/view/history_view_chat_preview.h
     history/view/history_view_chat_section.cpp
     history/view/history_view_chat_section.h
+    history/view/history_view_chat_section_monoforum.cpp
     history/view/history_view_contact_status.cpp
     history/view/history_view_contact_status.h
     history/view/history_view_context_menu.cpp
@@ -1233,6 +1253,8 @@ PRIVATE
     history/view/history_view_summary_header.h
     history/view/history_view_text_helper.cpp
     history/view/history_view_text_helper.h
+    history/view/history_view_touch_scroll.cpp
+    history/view/history_view_touch_scroll.h
     history/view/history_view_transcribe_button.cpp
     history/view/history_view_transcribe_button.h
     history/view/history_view_translate_bar.cpp
@@ -1247,8 +1269,6 @@ PRIVATE
     history/view/history_view_blur_kernel.h
     history/view/history_view_view_button.cpp
     history/view/history_view_view_button.h
-    history/view/history_view_webpage_preview.cpp
-    history/view/history_view_webpage_preview.h
     history/view/history_view_welcome_messages_section.cpp
     history/view/history_view_welcome_messages_section.h
     history/history.cpp
@@ -1383,6 +1403,8 @@ PRIVATE
     info/profile/info_profile_members_controllers.h
     info/profile/info_profile_phone_menu.cpp
     info/profile/info_profile_phone_menu.h
+    info/profile/info_profile_pills.cpp
+    info/profile/info_profile_pills.h
     info/profile/info_profile_qr_emoji.cpp
     info/profile/info_profile_qr_emoji.h
     info/profile/info_profile_qr_gifts.cpp
@@ -1431,7 +1453,6 @@ PRIVATE
     info/reactions_list/info_reactions_list_widget.h
     info/requests_list/info_requests_list_widget.cpp
     info/requests_list/info_requests_list_widget.h
-    info/saved/info_saved_music_common.cpp
     info/saved/info_saved_music_common.h
     info/saved/info_saved_music_provider.cpp
     info/saved/info_saved_music_provider.h
@@ -1820,7 +1841,6 @@ PRIVATE
     platform/linux/tray_linux.h
     platform/linux/update_install_linux.cpp
     platform/linux/update_install_linux.h
-    platform/linux/webauthn_linux.cpp
     platform/mac/file_utilities_mac.mm
     platform/mac/file_utilities_mac.h
     platform/mac/global_menu_mac.h
@@ -1836,6 +1856,8 @@ PRIVATE
     platform/mac/native_event_mac.mm
     platform/mac/notifications_manager_mac.mm
     platform/mac/notifications_manager_mac.h
+    platform/mac/notifications_manager_mac_tokens.mm
+    platform/mac/notifications_manager_mac_tokens.h
     platform/mac/notifications_manager_mac_un.mm
     platform/mac/notifications_manager_mac_un.h
     platform/mac/overlay_widget_mac.h
@@ -1883,6 +1905,7 @@ PRIVATE
     platform/win/overlay_widget_win.h
     platform/win/specific_win.cpp
     platform/win/specific_win.h
+    platform/win/system_intl_win.cpp
     platform/win/translate_provider_win.h
     platform/win/tray_win.cpp
     platform/win/tray_win.h
@@ -1909,6 +1932,7 @@ PRIVATE
     platform/platform_overlay_widget.cpp
     platform/platform_overlay_widget.h
     platform/platform_specific.h
+    platform/platform_system_intl.h
     platform/platform_translate_provider.h
     platform/platform_tray.h
     platform/platform_webauthn.h
@@ -1971,7 +1995,6 @@ PRIVATE
     settings/sections/settings_calls.h
     settings/settings_codes.cpp
     settings/settings_codes.h
-    settings/settings_common_session.cpp
     settings/settings_common_session.h
     settings/detailed_settings_button.cpp
     settings/detailed_settings_button.h
@@ -2019,6 +2042,7 @@ PRIVATE
     settings/settings_power_saving.h
     settings/sections/settings_premium.cpp
     settings/sections/settings_premium.h
+    settings/sections/settings_premium_common.h
     settings/settings_privacy_controllers.cpp
     settings/settings_privacy_controllers.h
     settings/settings_scale_preview.cpp
@@ -2096,14 +2120,31 @@ PRIVATE
     test/test_capture.h
     test/test_chat_menu.cpp
     test/test_chat_menu.h
+    test/test_chat_show.cpp
+    test/test_chat_show.h
+    test/test_chat_show_place.cpp
+    test/test_chat_show_place.h
+    test/test_chat_show_self_test.cpp
     test/test_clipboard.cpp
     test/test_clipboard.h
     test/test_console_lock.cpp
     test/test_console_lock.h
+    test/test_console_shield.cpp
+    test/test_console_shield.h
+    test/test_controller_ready.cpp
+    test/test_controller_ready.h
     test/test_corner_patch.cpp
     test/test_corner_patch.h
     test/test_custom_emoji.cpp
     test/test_custom_emoji.h
+    test/test_expiry_window.cpp
+    test/test_expiry_window.h
+    test/test_fixture_fence.cpp
+    test/test_fixture_fence.h
+    test/test_fixture_transaction.cpp
+    test/test_fixture_transaction.h
+    test/test_full_owner_capture.cpp
+    test/test_full_owner_capture.h
     test/test_gated_stage.cpp
     test/test_gated_stage.h
     test/test_gram_reconcile.cpp
@@ -2114,6 +2155,10 @@ PRIVATE
     test/test_hover.h
     test/test_ink.cpp
     test/test_ink.h
+    test/test_l10n_seams.cpp
+    test/test_l10n_seams.h
+    test/test_lang_ids_migration.cpp
+    test/test_lang_ids_migration.h
     test/test_lang_pack.cpp
     test/test_lang_pack.h
     test/test_launch_fuse.cpp
@@ -2137,6 +2182,7 @@ PRIVATE
     test/test_notify_override.h
     test/test_open_handoff.cpp
     test/test_open_handoff.h
+    test/test_paint_stream.h
     test/test_palette.cpp
     test/test_palette.h
     test/test_panel.cpp
@@ -2150,6 +2196,9 @@ PRIVATE
     test/test_publication_identity_scan.cpp
     test/test_publication_identity_scan.h
     test/test_publication_identity_scan_self_test.cpp
+    test/test_qpa_mouse.cpp
+    test/test_qpa_mouse.h
+    test/test_qpa_mouse_self_test.cpp
     test/test_queued_drag.cpp
     test/test_queued_drag.h
     test/test_rpc_fixture.cpp
@@ -2171,6 +2220,8 @@ PRIVATE
     test/test_text_reads.h
     test/test_toast_capture.cpp
     test/test_toast_capture.h
+    test/test_touch.cpp
+    test/test_touch.h
     test/test_transfer.cpp
     test/test_transfer.h
     test/test_via_window.cpp
@@ -2183,10 +2234,92 @@ PRIVATE
     test/test_web_cache.h
     test/test_wheel.cpp
     test/test_wheel.h
+    test/test_widget_attacks.cpp
+    test/test_widget_attacks.h
+    test/test_widget_bot.cpp
+    test/test_widget_bot.h
+    test/test_widget_conformance.cpp
+    test/test_widget_conformance.h
+    test/test_widget_conformance_actions.cpp
+    test/test_widget_conformance_actions.h
+    test/test_widget_conformance_bridge.cpp
+    test/test_widget_conformance_bridge.h
+    test/test_widget_conformance_context.cpp
+    test/test_widget_conformance_context.h
+    test/test_widget_conformance_hosts.cpp
+    test/test_widget_conformance_hosts.h
+    test/test_widget_conformance_input.cpp
+    test/test_widget_conformance_input.h
+    test/test_widget_conformance_paint_policy.cpp
+    test/test_widget_conformance_paint_policy.h
+    test/test_widget_conformance_pictures.cpp
+    test/test_widget_conformance_pictures.h
+    test/test_widget_conformance_state.h
+    test/test_widget_conformance_stop.cpp
+    test/test_widget_conformance_stop.h
+    test/test_widget_fixture.cpp
+    test/test_widget_fixture.h
+    test/test_widget_host.cpp
+    test/test_widget_host.h
+    test/test_widget_ops.cpp
+    test/test_widget_ops.h
+    test/test_widget_paint_policy.cpp
+    test/test_widget_paint_policy.h
+    test/test_widget_stress.cpp
+    test/test_widget_stress.h
+    test/test_widget_stress_internal.h
+    test/test_widget_stress_live.cpp
     test/test_widgets.cpp
     test/test_widgets.h
     test/test_window_exposure.cpp
     test/test_window_exposure.h
+    tgw/tgw_backend.cpp
+    tgw/tgw_backend.h
+    tgw/tgw_bridge.cpp
+    tgw/tgw_bridge.h
+    tgw/tgw_canvas.cpp
+    tgw/tgw_canvas.h
+    tgw/tgw_cursor.cpp
+    tgw/tgw_cursor.h
+    tgw/tgw_emoji.cpp
+    tgw/tgw_emoji.h
+    tgw/tgw_emoji_images.cpp
+    tgw/tgw_emoji_images.h
+    tgw/tgw_intl.cpp
+    tgw/tgw_intl.h
+    tgw/tgw_log_box.cpp
+    tgw/tgw_log_box.h
+    tgw/tgw_media.cpp
+    tgw/tgw_media.h
+    tgw/tgw_painter.cpp
+    tgw/tgw_painter.h
+    tgw/tgw_painter_filters.cpp
+    tgw/tgw_painter_filters.h
+    tgw/tgw_renderer.cpp
+    tgw/tgw_renderer.h
+    tgw/tgw_resources.cpp
+    tgw/tgw_resources.h
+    tgw/tgw_runtime.cpp
+    tgw/tgw_runtime.h
+    tgw/tgw_scroll.cpp
+    tgw/tgw_scroll.h
+    tgw/tgw_scroll_lists.cpp
+    tgw/tgw_selection.cpp
+    tgw/tgw_selection.h
+    tgw/tgw_selection_lists.cpp
+    tgw/tgw_state.cpp
+    tgw/tgw_state.h
+    tgw/tgw_storage.cpp
+    tgw/tgw_storage.h
+    tgw/tgw_storage_disk.cpp
+    tgw/tgw_storage_disk.h
+    tgw/tgw_theme.cpp
+    tgw/tgw_theme.h
+    tgw/tgw_touch.cpp
+    tgw/tgw_touch.h
+    tgw/tgw_touch_lists.cpp
+    tgw/tgw_wallet.cpp
+    tgw/tgw_wallet.h
     ui/boxes/edit_invite_link_session.cpp
     ui/boxes/edit_invite_link_session.h
     ui/boxes/emoji_stake_box.cpp
@@ -2230,6 +2363,10 @@ PRIVATE
     ui/effects/message_sending_animation_common.h
     ui/effects/message_sending_animation_controller.cpp
     ui/effects/message_sending_animation_controller.h
+    ui/effects/message_sending_history.cpp
+    ui/effects/message_sending_history.h
+    ui/effects/message_sending_text_flight.cpp
+    ui/effects/message_sending_text_flight.h
     ui/effects/peer_qr_colors_panel.cpp
     ui/effects/peer_qr_colors_panel.h
     ui/effects/peer_qr_emoji_field.cpp
@@ -2266,6 +2403,8 @@ PRIVATE
     ui/image/image_location.h
     ui/image/image_location_factory.cpp
     ui/image/image_location_factory.h
+    ui/image/image_opaque_bounds.cpp
+    ui/image/image_opaque_bounds.h
     ui/text/format_song_document_name.cpp
     ui/text/format_song_document_name.h
     ui/widgets/expandable_peer_list.cpp
@@ -2385,6 +2524,8 @@ PRIVATE
     wallet/wallet_stream.h
     wallet/wallet_ton_connect.cpp
     wallet/wallet_ton_connect.h
+    wallet/wallet_ton_connect_bot.cpp
+    wallet/wallet_ton_connect_bot.h
     wallet/wallet_ton_connect_box.cpp
     wallet/wallet_ton_connect_box.h
     wallet/wallet_ton_connect_claims.cpp
@@ -2468,10 +2609,13 @@ PRIVATE
     window/session/window_session_media.cpp
     window/window_session_controller.cpp
     window/window_session_controller.h
+    window/window_session_controller_bot_forum.cpp
     window/window_session_controller_contact.cpp
     window/window_session_controller_link_info.h
     window/window_setup_email.cpp
     window/window_setup_email.h
+    window/window_text_drop.cpp
+    window/window_text_drop.h
     window/window_top_bar_wrap.h
     window/window_unlock_passcode_box.cpp
     window/window_unlock_passcode_box.h
@@ -2527,6 +2671,10 @@ else()
     )
 endif()
 
+if (TDESKTOP_L10N_CAPTURE)
+    include(${TDESKTOP_L10N_CAPTURE}/capture.cmake)
+endif()
+
 if (NOT build_winstore)
     remove_target_sources(Telegram ${src_loc}
         platform/win/windows_start_task.cpp
@@ -2557,6 +2705,7 @@ PRIVATE
     qrc/telegram/picker.qrc
     qrc/telegram/telegram.qrc
     qrc/telegram/sounds.qrc
+    qrc/telegram/tgw.qrc
     winrc/Telegram.rc
     winrc/Telegram.manifest
     langs/lang.strings
@@ -2830,6 +2979,7 @@ if (MSVC)
         /DELAYLOAD:wtsapi32.dll
         /DELAYLOAD:propsys.dll
         /DELAYLOAD:uiautomationcore.dll
+        /DELAYLOAD:icu.dll
     )
     if (QT_VERSION GREATER 6)
         if (NOT build_winarm)

@@ -115,6 +115,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
 #include "spellcheck/spellcheck_types.h"
+#include "tgw/tgw_log_box.h"
+#include "tgw/tgw_selection.h"
 #include "apiwrap.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
@@ -381,7 +383,7 @@ void AddPhotoActions(
 			&st::menuIconSaveImage);
 		menu->addAction(tr::lng_context_copy_image(tr::now), [=] {
 			const auto item = photo->owner().message(contextId);
-			if (!list->showCopyMediaRestriction(item)) {
+			if (item && !list->showCopyMediaRestriction(item)) {
 				CopyImage(photo);
 			}
 		}, &st::menuIconCopy);
@@ -922,12 +924,10 @@ bool AddViewRepliesAction(
 	const auto highlightId = topicRootId ? item->id : 0;
 	const auto phrase = topicRootId
 		? tr::lng_replies_view_topic(tr::now)
-		: (repliesCount > 0)
-		? tr::lng_replies_view(
+		: tr::lng_replies_view(
 			tr::now,
 			lt_count,
-			repliesCount)
-		: tr::lng_replies_view_thread(tr::now);
+			repliesCount);
 	const auto controller = list->controller();
 	const auto history = item->history();
 	menu->addAction(phrase, crl::guard(controller, [=] {
@@ -1842,7 +1842,7 @@ void FillContextMenuItems(
 	}
 	AddTodoListAction(result, request, list);
 
-	if (request.overSelection
+	if ((request.overSelection || (item && list->hasWidgetSelection(item)))
 		&& !list->hasCopyRestrictionForSelected()
 		&& !list->getSelectedText().empty()) {
 		const auto text = request.selectedItems.empty()
@@ -1850,6 +1850,7 @@ void FillContextMenuItems(
 			: tr::lng_context_copy_selected_items(tr::now);
 		result->addAction(text, [=] {
 			list->copySelectedText();
+			list->clearSelected();
 		}, &st::menuIconCopy);
 	}
 	if (request.overSelection
@@ -1947,11 +1948,12 @@ void FillContextMenuItems(
 								? MsgId()
 								: item->fullId().msg,
 							translate,
-							list->hasCopyRestriction(view->data())));
+							list->hasCopyRestriction(item)));
 					}
 				}, &st::menuIconTranslate);
 			}
 		}
+		Tgw::AddLogAction(result, view, list->controller()->uiShow());
 	}
 
 	AddCopyLinkAction(result, link);
@@ -2392,6 +2394,7 @@ void AddPollActions(
 		not_null<Window::SessionController*> controller,
 		bool skipRetractVote,
 		bool skipViewStats) {
+	const auto itemId = item->fullId();
 	{
 		constexpr auto kRadio = "\xf0\x9f\x94\x98";
 		const auto radio = QString::fromUtf8(kRadio);
@@ -2401,12 +2404,14 @@ void AddPollActions(
 		}
 		if (!Ui::SkipTranslate(text)) {
 			menu->addAction(tr::lng_context_translate(tr::now), [=] {
-				controller->show(Box(
-					Ui::TranslateBox,
-					item->history()->peer,
-					MsgId(),
-					std::move(text),
-					item->forbidsForward()));
+				if (const auto item = poll->owner().message(itemId)) {
+					controller->show(Box(
+						Ui::TranslateBox,
+						item->history()->peer,
+						MsgId(),
+						std::move(text),
+						item->forbidsForward()));
+				}
 			}, &st::menuIconTranslate);
 		}
 	}
@@ -2417,7 +2422,6 @@ void AddPollActions(
 		&& (context != Context::ChatPreview)) {
 		return;
 	}
-	const auto itemId = item->fullId();
 	if (poll->canViewStats() && item->isRegular() && !skipViewStats) {
 		menu->addAction(tr::lng_polls_view_stats(tr::now), [=] {
 			ShowPollStatsBox(controller, itemId);
@@ -2478,10 +2482,11 @@ void AddSaveSoundForNotifications(
 		return;
 	}
 	const auto show = controller->uiShow();
+	const auto itemId = item->fullId();
 	menu->addAction(tr::lng_context_save_custom_sound(tr::now), [=] {
 		Api::ToggleSavedRingtone(
 			document,
-			item->fullId(),
+			itemId,
 			[=] { show->showToast(
 				tr::lng_ringtones_toast_added(tr::now)); },
 			true);
@@ -2770,8 +2775,8 @@ void ShowWhoReactedMenu(
 		int addedToBottom = 0;
 	};
 	const auto itemId = item->fullId();
+	const auto originPeer = item->history()->peer;
 	const auto participantChosen = [=](Ui::WhoReadParticipant who) {
-		const auto originPeer = item->history()->peer;
 		const auto participant = originPeer->owner().peer(PeerId(who.id));
 		Reactions::ShowReactionParticipantInfo(
 			controller,
@@ -2783,7 +2788,7 @@ void ShowWhoReactedMenu(
 	const auto moderateReactionChosen = MakeModerateReactionChosen(
 		controller,
 		itemId,
-		item->history()->peer,
+		originPeer,
 		[=] {
 			if (*menu) {
 				(*menu)->hideMenu();
@@ -2833,6 +2838,7 @@ void ShowWhoReactedMenu(
 				context,
 				st::whoReadMenu);
 			(*menu)->lifetime().add(base::take(lifetime));
+			Tgw::ListSelection::Watch(context, menu->get());
 		}
 		filler->populate(
 			menu->get(),
@@ -2877,13 +2883,6 @@ std::vector<StickerSetIdentifier> CollectEmojiPacks(
 			if (entity.type() == EntityType::CustomEmoji) {
 				const auto data = Data::ParseCustomEmojiData(entity.data());
 				push(data);
-			}
-		}
-		break;
-	case EmojiPacksSource::Reactions:
-		for (const auto &reaction : item->reactions()) {
-			if (const auto customId = reaction.id.custom()) {
-				push(customId);
 			}
 		}
 		break;
@@ -2937,19 +2936,11 @@ void AddEmojiPacksAction(
 					TextWithEntities{ name },
 					tr::rich);
 			}
-			[[fallthrough]];
-		case EmojiPacksSource::Reactions:
-			return name.text.isEmpty()
-				? tr::lng_context_animated_reactions_many(
-					tr::now,
-					lt_count,
-					count,
-					tr::rich)
-				: tr::lng_context_animated_reactions(
-					tr::now,
-					lt_name,
-					TextWithEntities{ name },
-					tr::rich);
+			return tr::lng_context_animated_reactions_many(
+				tr::now,
+				lt_count,
+				count,
+				tr::rich);
 		case EmojiPacksSource::PollOption:
 			return name.text.isEmpty()
 				? tr::lng_context_animated_poll_option_many(

@@ -125,4 +125,6 @@ private:
 
 [[nodiscard]] QString ScreenDisplayLabel(const QScreen *screen);
 
+[[nodiscard]] QRect ScreenAvailableGeometry(const QScreen *screen);
+
 } // namespace Platform
