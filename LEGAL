@@ -20,6 +20,11 @@ More information about the Telegram project: https://telegram.org
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
 
+The deleted-message archive and viewer include code from AyuGram Desktop,
+Copyright @Radolyn, 2026, distributed under the GNU General Public License.
+Source: https://github.com/AyuGram/AyuGramDesktop
+The bundled SQLite and sqlite_orm sources retain their upstream notices.
+
 The Material 3 circular progress motion is adapted from AndroidX,
 Copyright 2022 The Android Open Source Project, under the Apache License 2.0.
 Source: https://android.googlesource.com/platform/frameworks/support/
