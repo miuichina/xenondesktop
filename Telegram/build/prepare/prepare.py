@@ -80,8 +80,6 @@ for arg in sys.argv[1:]:
         runCommand.append('shell')
 
 pathPrefixes = [
-    'tools',
-    'LLVM\\bin',
     'ThirdParty\\msys64\\ucrt64\\bin',
     'ThirdParty\\jom',
     'ThirdParty\\gyp',
@@ -281,8 +279,6 @@ def writeCacheKey(stage):
 stages = []
 
 def removeDir(folder):
-    if win and folder == 'msys64' and pathlib.Path(thirdPartyDir, 'msys64/usr/bin/pacman.exe').exists():
-        return ''
     if win:
         return 'if exist ' + folder + ' rmdir /Q /S ' + folder + '\nif exist ' + folder + ' exit /b 1'
     return 'rm -rf ' + folder
@@ -344,30 +340,6 @@ def stage(name, commands, location = 'Libraries'):
     else:
         error('Unknown location: ' + location)
     [commands, dependencies, version] = filterByPlatform(commands)
-    if win and name == 'msys64' and pathlib.Path(thirdPartyDir, 'msys64/usr/bin/pacman.exe').exists():
-        commands = '\n'.join(line for line in commands.splitlines()
-            if not ('iwr -OutFile ./msys64.exe' in line or line.strip() in ['msys64.exe', 'del msys64.exe']))
-    if win and name.startswith('qt_'):
-        commands = commands.replace('git clone -b ', 'git clone --depth 1 -b ')
-        commands = commands.replace('git submodule update --init --recursive --progress ', 'git submodule update --init --recursive --depth 1 --progress ')
-    if win and name == 'libvpx':
-        dependencies += ['../../tools/build-vpx-ninja.py', '../../llvm-toolchain.cmake']
-    if win and name == 'libwebp':
-        commands = '\n'.join(line for line in commands.splitlines() if line.startswith('git clone ') or line.strip() == 'cd libwebp')
-        commands += '\npython "$ROOT_DIR/tools/build-webp-llvm.py"\n'
-        dependencies += ['../../tools/build-webp-llvm.py', '../../tools/static-runtime.cmake']
-    if win:
-        commands = commands.replace('%NUMBER_OF_PROCESSORS%', '2')
-        commands = commands.replace('echo cl ', 'echo clang-cl ')
-        commands = commands.replace("= 'cl'", "= 'clang-cl'")
-        commands = commands.replace("= 'lib'", "= 'llvm-lib'")
-        commands = commands.replace("= 'rc'", "= 'llvm-rc'")
-        commands = commands.replace('move ossl_static.pdb out.dbg', 'rem LLVM embeds compiler debug information in objects')
-        if name == 'lzma':
-            commands = commands.replace('msbuild -m LzmaLib.sln /property:Configuration=Debug /property:Platform="$X8664" %ToolsetProp%',
-                'python "$ROOT_DIR/tools/build-lzma.py"')
-        if name == 'rust':
-            commands = commands.replace('--default-host ', '--no-modify-path --default-host ')
     if len(commands) > 0:
         stages.append({
             'name': name,
@@ -1015,8 +987,8 @@ stage('libwebp', """
     git clone -b v1.6.0 https://github.com/webmproject/libwebp.git
     cd libwebp
 win:
-    nmake /f Makefile.vc ARCH=x64 CFG=debug-static OBJDIR=out RTLIBCFG=static all
-    nmake /f Makefile.vc ARCH=x64 CFG=release-static OBJDIR=out RTLIBCFG=static all
+    nmake /f Makefile.vc CFG=debug-static OBJDIR=out RTLIBCFG=static all
+    nmake /f Makefile.vc CFG=release-static OBJDIR=out RTLIBCFG=static all
     copy out\\release-static\\$X8664\\lib\\libwebp.lib out\\release-static\\$X8664\\lib\\webp.lib
     copy out\\release-static\\$X8664\\lib\\libwebpdemux.lib out\\release-static\\$X8664\\lib\\webpdemux.lib
     copy out\\release-static\\$X8664\\lib\\libwebpmux.lib out\\release-static\\$X8664\\lib\\webpmux.lib
