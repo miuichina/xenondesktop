@@ -57,7 +57,7 @@ void TopBar::setBlurBackdrop(Fn<QImage()> backdrop) {
 	_blur = std::make_unique<HistoryView::BlurBackground>(
 		this,
 		std::move(backdrop),
-		[=] { return anim::color(_st.bg, _st.highlightBg, _a_highlight.value(0.)); });
+		[=] { return _st.bg->c; });
 	if (_st.radius) {
 		sizeValue() | rpl::on_next([=] {
 			auto path = QPainterPath();
