@@ -43,8 +43,20 @@ jobs:
           sudo apt-get install -y python3-jinja2
           cd Telegram/build/docker/centos_env
           DEBUG= LTO= JOBS=4 python3 gen_dockerfile.py > Dockerfile.generated
-          docker build -f Dockerfile.generated -t xenon-linux-build .
-          df -h
+          sed -i 's/^dnf -y install cmake /dnf -y --refresh --nobest install cmake /' Dockerfile.generated
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and cache dependencies
+        uses: docker/build-push-action@v7
+        with:
+          context: Telegram/build/docker/centos_env
+          file: Telegram/build/docker/centos_env/Dockerfile.generated
+          load: true
+          tags: xenon-linux-build
+          cache-from: type=gha,scope=xenon-linux-release-v1
+          cache-to: type=gha,scope=xenon-linux-release-v1,mode=max,ignore-error=true
 
       - name: Build Release
         env:

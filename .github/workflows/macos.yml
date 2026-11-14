@@ -45,13 +45,42 @@ jobs:
           DEPLOYMENT_TARGET=$(/usr/libexec/PlistBuddy -c 'Print :SupportedTargets:macosx:MinimumDeploymentTarget' "$SDKROOT/SDKSettings.plist")
           echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
           echo "MACOSX_DEPLOYMENT_TARGET=$DEPLOYMENT_TARGET" >> "$GITHUB_ENV"
+          { xcodebuild -version; xcrun clang --version; xcrun --sdk macosx --show-sdk-version; echo "$DEPLOYMENT_TARGET"; } > "$RUNNER_TEMP/mac-toolchain.txt"
+          echo "MAC_TOOLCHAIN_KEY=$(shasum -a 256 "$RUNNER_TEMP/mac-toolchain.txt" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
           df -h
 
+      - name: Restore dependencies
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            TBuild/Libraries
+            TBuild/ThirdParty
+          key: macos-arm64-release-libs-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py', 'TBuild/tdesktop/Telegram/build/build_mac.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            macos-arm64-release-libs-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py', 'TBuild/tdesktop/Telegram/build/build_mac.py') }}-
+
       - name: Prepare dependencies
+        id: prepare
         run: |
           cd TBuild
           ./tdesktop/Telegram/build/prepare/mac.sh silent
           df -h
+
+      - name: Reduce dependency cache size
+        if: ${{ !cancelled() && steps.prepare.outcome != 'skipped' }}
+        run: |
+          if [ -d TBuild/Libraries ]; then
+            find TBuild/Libraries '(' '(' ! '(' -name '*.a' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -name 'macos_toolchain.json' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' ')' -type f ')' -o -empty ')' -delete
+          fi
+
+      - name: Save dependencies
+        if: ${{ !cancelled() && steps.prepare.outcome != 'skipped' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            TBuild/Libraries
+            TBuild/ThirdParty
+          key: macos-arm64-release-libs-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py', 'TBuild/tdesktop/Telegram/build/build_mac.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Build Release
         env:
