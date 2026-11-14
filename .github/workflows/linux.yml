@@ -69,6 +69,7 @@ jobs:
             -e CMAKE_BUILD_PARALLEL_LEVEL=4 \
             xenon-linux-build /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
             -D CMAKE_CONFIGURATION_TYPES=Release \
+            -D CMAKE_CXX_FLAGS=-Wno-error=aggressive-loop-optimizations \
             -D DESKTOP_APP_SPECIAL_TARGET=linux \
             -D DESKTOP_APP_ENABLE_LTO=OFF \
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
