@@ -44,7 +44,7 @@ def release_commits(previous, current):
     return git("log", "--topo-order", "--abbrev=7", "--format=%h: %s", *revision, "--").splitlines()
 
 
-def build_messages(short_sha, commits, asset):
+def build_messages(short_sha, commits, asset, other_assets=()):
     url = asset["browser_download_url"]
     if not url.startswith("https://"):
         raise ValueError("EXE download URL must use HTTPS")
@@ -54,8 +54,16 @@ def build_messages(short_sha, commits, asset):
     lines.extend([
         "",
         f'<a href="{html.escape(url, quote=True)}">Download exe</a>'
-        f" ({asset['size'] / (1024 * 1024):.1f} МБ)",
+        f" ({asset['size'] / (1024 * 1024):.1f} MB)",
     ])
+    for label, other in other_assets:
+        url = other["browser_download_url"]
+        if not url.startswith("https://"):
+            raise ValueError("Download URL must use HTTPS")
+        lines.append(
+            f'<a href="{html.escape(url, quote=True)}">{html.escape(label)}</a>'
+            f" ({other['size'] / (1024 * 1024):.1f} MB)"
+        )
     messages = []
     message = ""
     for line in lines:
@@ -113,7 +121,14 @@ def main():
     asset = next(asset for asset in release["assets"] if asset["name"] == "Telegram.exe")
     pages = github(f"repos/{repo}/releases?per_page=100")
     previous = previous_release_commit([item for page in pages for item in page], current, tag)
-    messages = build_messages(git("rev-parse", "--short=7", current), release_commits(previous, current), asset)
+    assets = {item["name"]: item for item in release["assets"]}
+    other_assets = [
+        (label, assets[name]) for label, name in (
+            ("Download Linux x64", "Xenon-Linux-x64.tar.gz"),
+            ("Download macOS Apple Silicon", "Xenon-macOS-arm64.zip"),
+        )
+    ]
+    messages = build_messages(git("rev-parse", "--short=7", current), release_commits(previous, current), asset, other_assets)
     for message in messages:
         if not send_message(token, chat_id, message):
             return

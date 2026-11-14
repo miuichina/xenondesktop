@@ -1,0 +1,84 @@
+name: macOS
+run-name: macOS Release | ${{ github.event_name }} | ${{ github.ref_name }}
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths-ignore: ['**.md', 'docs/**', 'changelog.txt']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: macOS arm64 Release
+    runs-on: macos-15
+    timeout-minutes: 360
+    env:
+      TDESKTOP_MAC_TOOLCHAIN: system
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      CMAKE_BUILD_PARALLEL_LEVEL: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: TBuild/tdesktop
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check API credentials
+        env:
+          API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: test -n "$API_ID" && test -n "$API_HASH"
+
+      - name: Prepare tools
+        run: |
+          df -h
+          brew install automake libtool cmake wget pkg-config gnu-tar ninja nasm meson
+          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          DEPLOYMENT_TARGET=$(/usr/libexec/PlistBuddy -c 'Print :SupportedTargets:macosx:MinimumDeploymentTarget' "$SDKROOT/SDKSettings.plist")
+          echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=$DEPLOYMENT_TARGET" >> "$GITHUB_ENV"
+          df -h
+
+      - name: Prepare dependencies
+        run: |
+          cd TBuild
+          ./tdesktop/Telegram/build/prepare/mac.sh silent
+          df -h
+
+      - name: Build Release
+        env:
+          API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          cd TBuild/tdesktop/Telegram
+          ./configure.sh \
+            -D CMAKE_CONFIGURATION_TYPES=Release \
+            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -D CMAKE_OSX_SYSROOT="$SDKROOT" \
+            -D CMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
+            -D CMAKE_OSX_ARCHITECTURES=arm64 \
+            -D DESKTOP_APP_MAC_ARCH=arm64 \
+            -D DESKTOP_APP_SPECIAL_TARGET=mac \
+            -D DESKTOP_APP_ENABLE_LTO=OFF \
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
+            -D "TDESKTOP_API_ID=$API_ID" -D "TDESKTOP_API_HASH=$API_HASH"
+          cmake --build ../out --config Release --target Telegram --parallel 3
+          test -s ../out/Release/Telegram.app/Contents/MacOS/Telegram
+          ditto -c -k --sequesterRsrc --keepParent ../out/Release/Telegram.app "$GITHUB_WORKSPACE/Xenon-macOS-arm64.zip"
+          df -h
+
+      - name: Upload macOS build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: Xenon-macOS-arm64-Release
+          path: Xenon-macOS-arm64.zip
+          if-no-files-found: error
+          retention-days: 14

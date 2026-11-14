@@ -1,0 +1,75 @@
+name: Linux x64
+run-name: Linux x64 Release | ${{ github.event_name }} | ${{ github.ref_name }}
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths-ignore: ['**.md', 'docs/**', 'changelog.txt']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-x64-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    name: Linux x64 Release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check API credentials
+        env:
+          API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: test -n "$API_ID" && test -n "$API_HASH"
+
+      - name: Record runner resources
+        run: |
+          df -h
+          free -h
+
+      - name: Prepare Docker image
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-jinja2
+          cd Telegram/build/docker/centos_env
+          DEBUG= LTO= JOBS=4 python3 gen_dockerfile.py > Dockerfile.generated
+          docker build -f Dockerfile.generated -t xenon-linux-build .
+          df -h
+
+      - name: Build Release
+        env:
+          API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" \
+            -v "$PWD:/usr/src/tdesktop" -w /usr/src/tdesktop \
+            -e CMAKE_BUILD_PARALLEL_LEVEL=4 \
+            xenon-linux-build /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+            -D CMAKE_CONFIGURATION_TYPES=Release \
+            -D DESKTOP_APP_SPECIAL_TARGET=linux \
+            -D DESKTOP_APP_ENABLE_LTO=OFF \
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
+            -D "TDESKTOP_API_ID=$API_ID" -D "TDESKTOP_API_HASH=$API_HASH"
+          test -s out/Release/Telegram
+          mkdir -p artifact/Xenon
+          cp out/Release/Telegram artifact/Xenon/Telegram
+          tar -C artifact -czf artifact/Xenon-Linux-x64.tar.gz Xenon
+          df -h
+
+      - name: Upload Linux build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: Xenon-Linux-x64-Release
+          path: artifact/Xenon-Linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 14
