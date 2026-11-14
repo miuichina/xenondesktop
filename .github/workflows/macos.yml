@@ -64,14 +64,20 @@ jobs:
         id: prepare
         run: |
           cd TBuild
+          QT_VERSION=$(python3 -c 'import os, sys; sys.path.insert(0, "tdesktop/Telegram/build"); import qt_version; qt_version.resolve(""); print(os.environ["QT"])')
+          if [ -d Libraries/local/Qt-"$QT_VERSION" ] && [ ! -x Libraries/local/Qt-"$QT_VERSION"/libexec/moc ]; then
+            echo "Cached Qt tools are missing; rebuilding Qt."
+            rm -f "Libraries/cache_keys/qt_$QT_VERSION"
+          fi
           ./tdesktop/Telegram/build/prepare/mac.sh silent
+          test -x "Libraries/local/Qt-$QT_VERSION/libexec/moc"
           df -h
 
       - name: Reduce dependency cache size
         if: ${{ !cancelled() && steps.prepare.outcome != 'skipped' }}
         run: |
           if [ -d TBuild/Libraries ]; then
-            find TBuild/Libraries '(' '(' ! '(' -name '*.a' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -name 'macos_toolchain.json' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' ')' -type f ')' -o -empty ')' -delete
+            find TBuild/Libraries '(' '(' ! '(' -name '*.a' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -name 'macos_toolchain.json' -o -path '*/local/*' -o -path '*/bin/*' -o -path '*/libexec/*' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' ')' -type f ')' -o -empty ')' -delete
           fi
 
       - name: Save dependencies
