@@ -69,8 +69,13 @@ jobs:
             echo "Cached Qt tools are missing; rebuilding Qt."
             rm -f "Libraries/cache_keys/qt_$QT_VERSION"
           fi
+          if [ -d Libraries/local/include/wallet_engine ] && [ ! -f Libraries/local/src/wallet_engine/wallet_engine.cpp ]; then
+            echo "Cached wallet engine source is missing; rebuilding its dependencies."
+            rm -f Libraries/cache_keys/tlottie Libraries/cache_keys/wallet-engine Libraries/cache_keys/tdesktop_rust
+          fi
           ./tdesktop/Telegram/build/prepare/mac.sh silent
           test -x "Libraries/local/Qt-$QT_VERSION/libexec/moc"
+          test -s Libraries/local/src/wallet_engine/wallet_engine.cpp
           df -h
 
       - name: Reduce dependency cache size
