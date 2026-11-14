@@ -21,6 +21,7 @@ concurrency:
 jobs:
   windows:
     name: Windows x64 Release
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip win]') }}
     runs-on: windows-2025
     timeout-minutes: 360
     env:
