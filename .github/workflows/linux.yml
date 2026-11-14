@@ -59,7 +59,30 @@ jobs:
           cache-from: type=gha,scope=xenon-linux-release-v1
           cache-to: type=gha,scope=xenon-linux-release-v1,mode=max,ignore-error=true
 
+      - name: Restore compiler cache
+        id: compiler_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/linux-ccache.tar.gz.enc
+          key: linux-ccache-v1-${{ hashFiles('Telegram/build/docker/centos_env/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            linux-ccache-v1-${{ hashFiles('Telegram/build/docker/centos_env/**') }}-
+
+      - name: Prepare compiler cache
+        env:
+          CACHE_PASSWORD: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          mkdir -p .ci-ccache
+          if [ -f "$RUNNER_TEMP/linux-ccache.tar.gz.enc" ]; then
+            if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CACHE_PASSWORD -in "$RUNNER_TEMP/linux-ccache.tar.gz.enc" | tar -xz -C .ci-ccache; then
+              echo 'Compiler cache could not be restored; starting with an empty cache.'
+              rm -rf .ci-ccache
+              mkdir -p .ci-ccache
+            fi
+          fi
+
       - name: Build Release
+        id: build
         env:
           API_ID: ${{ secrets.TDESKTOP_API_ID }}
           API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
@@ -67,9 +90,14 @@ jobs:
           docker run --rm -u "$(id -u):$(id -g)" \
             -v "$PWD:/usr/src/tdesktop" -w /usr/src/tdesktop \
             -e CMAKE_BUILD_PARALLEL_LEVEL=4 \
-            xenon-linux-build /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+            -e CCACHE_DIR=/usr/src/tdesktop/.ci-ccache \
+            -e CCACHE_MAXSIZE=3G \
+            --entrypoint /usr/bin/env xenon-linux-build -u CCACHE_DISABLE \
+            /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
             -D CMAKE_CONFIGURATION_TYPES=Release \
-            -D CMAKE_CXX_FLAGS=-Wno-error=aggressive-loop-optimizations \
+            -D CMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
+            -D 'CMAKE_CXX_FLAGS=-Wno-error=aggressive-loop-optimizations -Wno-error=range-loop-construct -Wno-error=unused-local-typedefs' \
+            -D 'CMAKE_C_FLAGS=-Wno-error=stringop-overread' \
             -D DESKTOP_APP_SPECIAL_TARGET=linux \
             -D DESKTOP_APP_ENABLE_LTO=OFF \
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
@@ -79,6 +107,21 @@ jobs:
           cp out/Release/Telegram artifact/Xenon/Telegram
           tar -C artifact -czf artifact/Xenon-Linux-x64.tar.gz Xenon
           df -h
+
+      - name: Archive compiler cache
+        id: archive_cache
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
+        env:
+          CACHE_PASSWORD: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          tar -cz -C .ci-ccache . | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CACHE_PASSWORD -out "$RUNNER_TEMP/linux-ccache.tar.gz.enc"
+
+      - name: Save compiler cache
+        if: ${{ !cancelled() && steps.archive_cache.outcome == 'success' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/linux-ccache.tar.gz.enc
+          key: ${{ steps.compiler_cache.outputs.cache-primary-key }}
 
       - name: Upload Linux build
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
