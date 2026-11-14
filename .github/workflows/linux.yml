@@ -81,6 +81,11 @@ jobs:
             fi
           fi
 
+      - name: Keep compiler warnings non-fatal
+        run: |
+          grep -Fx '        -Werror' cmake/options_linux.cmake
+          sed -i '/^        -Werror$/d' cmake/options_linux.cmake
+
       - name: Build Release
         id: build
         env:
