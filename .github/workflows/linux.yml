@@ -92,11 +92,11 @@ jobs:
             -e CMAKE_BUILD_PARALLEL_LEVEL=4 \
             -e CCACHE_DIR=/usr/src/tdesktop/.ci-ccache \
             -e CCACHE_MAXSIZE=3G \
+            -e CCACHE_SLOPPINESS=pch_defines,time_macros \
             --entrypoint /usr/bin/env xenon-linux-build -u CCACHE_DISABLE \
             /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
             -D CMAKE_CONFIGURATION_TYPES=Release \
-            -D CMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
-            -D 'CMAKE_CXX_FLAGS=-Wno-error=aggressive-loop-optimizations -Wno-error=range-loop-construct -Wno-error=unused-local-typedefs' \
+            -D 'CMAKE_CXX_FLAGS=-fpch-preprocess -Wno-error=aggressive-loop-optimizations -Wno-error=range-loop-construct -Wno-error=unused-local-typedefs' \
             -D 'CMAKE_C_FLAGS=-Wno-error=stringop-overread' \
             -D DESKTOP_APP_SPECIAL_TARGET=linux \
             -D DESKTOP_APP_ENABLE_LTO=OFF \
@@ -107,6 +107,13 @@ jobs:
           cp out/Release/Telegram artifact/Xenon/Telegram
           tar -C artifact -czf artifact/Xenon-Linux-x64.tar.gz Xenon
           df -h
+
+      - name: Show compiler cache statistics
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" \
+            -v "$PWD/.ci-ccache:/cache" -e CCACHE_DIR=/cache \
+            --entrypoint /usr/bin/env xenon-linux-build -u CCACHE_DISABLE ccache -s
 
       - name: Archive compiler cache
         id: archive_cache
