@@ -105,11 +105,13 @@ jobs:
             -D 'CMAKE_C_FLAGS=-Wno-error=stringop-overread' \
             -D DESKTOP_APP_SPECIAL_TARGET=linux \
             -D DESKTOP_APP_ENABLE_LTO=OFF \
-            -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
             -D "TDESKTOP_API_ID=$API_ID" -D "TDESKTOP_API_HASH=$API_HASH"
           test -s out/Release/Telegram
+          test -s out/Release/Updater
           mkdir -p artifact/Xenon
           cp out/Release/Telegram artifact/Xenon/Telegram
+          cp out/Release/Updater artifact/Xenon/Updater
           tar -C artifact -czf artifact/Xenon-Linux-x64.tar.gz Xenon
           df -h
 

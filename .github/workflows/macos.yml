@@ -94,7 +94,15 @@ jobs:
             TBuild/ThirdParty
           key: macos-arm64-release-libs-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py', 'TBuild/tdesktop/Telegram/build/build_mac.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
+      - name: Restore intermediate build
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: TBuild/tdesktop/out
+          key: macos-arm64-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: macos-arm64-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-
+
       - name: Build Release
+        id: build
         env:
           API_ID: ${{ secrets.TDESKTOP_API_ID }}
           API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
@@ -109,14 +117,36 @@ jobs:
             -D DESKTOP_APP_MAC_ARCH=arm64 \
             -D DESKTOP_APP_SPECIAL_TARGET=mac \
             -D DESKTOP_APP_ENABLE_LTO=OFF \
-            -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
             -D "TDESKTOP_API_ID=$API_ID" -D "TDESKTOP_API_HASH=$API_HASH"
-          cmake --build ../out --config Release --target Telegram --parallel 3
+          set +e
+          cmake --build ../out --config Release --target Telegram --parallel 3 &
+          build_pid=$!
+          ( sleep 18000; kill -INT "$build_pid" 2>/dev/null || true ) &
+          timer_pid=$!
+          wait "$build_pid"
+          result=$?
+          kill "$timer_pid" 2>/dev/null || true
+          wait "$timer_pid" 2>/dev/null || true
+          if [ "$result" -ne 0 ]; then
+            echo "Build stopped with status $result; saving intermediate output."
+            exit 0
+          fi
+          echo "BUILD_COMPLETE=true" >> "$GITHUB_ENV"
           test -s ../out/Release/Telegram.app/Contents/MacOS/Telegram
+          test -s ../out/Release/Telegram.app/Contents/Frameworks/Updater
           ditto -c -k --sequesterRsrc --keepParent ../out/Release/Telegram.app "$GITHUB_WORKSPACE/Xenon-macOS-arm64.zip"
           df -h
 
+      - name: Save intermediate build
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: TBuild/tdesktop/out
+          key: macos-arm64-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+
       - name: Upload macOS build
+        if: env.BUILD_COMPLETE == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: Xenon-macOS-arm64-Release
