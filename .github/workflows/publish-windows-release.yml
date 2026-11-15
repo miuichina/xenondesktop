@@ -61,6 +61,12 @@ jobs:
           ' build.json > /dev/null
           sha=$(jq -r '.head_sha' build.json)
           echo "BUILD_SHA=$sha" >> "$GITHUB_ENV"
+          message=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.commit.message')
+          if [[ "$message" == *'[skip release]'* ]]; then
+            echo 'Release and Telegram announcement skipped by commit message.'
+            echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
+            exit 0
+          fi
           for item in "$LINUX_RUN_ID:linux.yml" "$MACOS_RUN_ID:macos.yml"; do
             id=${item%%:*}
             workflow=${item#*:}
