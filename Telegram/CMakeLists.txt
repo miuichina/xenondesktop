@@ -50,6 +50,11 @@ target_sources(Telegram PRIVATE
 set_source_files_properties(${src_loc}/ayu/libs/sqlite/sqlite3.c PROPERTIES
     SKIP_PRECOMPILE_HEADERS ON
 )
+if (APPLE)
+    set_source_files_properties(${src_loc}/ayu/data/ayu_database.cpp PROPERTIES
+        COMPILE_OPTIONS "-Wno-error=c++26-extensions;-Wno-error=unused-but-set-variable"
+    )
+endif()
 target_include_directories(Telegram PRIVATE ${src_loc}/ayu/libs/sqlite)
 
 include(cmake/telegram_options.cmake)
