@@ -8,7 +8,7 @@ run-name: macOS Release | ${{ github.event_name }} | ${{ github.ref_name }}
     paths-ignore: ['**.md', 'docs/**', 'changelog.txt']
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 concurrency:
@@ -104,27 +104,11 @@ jobs:
           key: macos-arm64-ninja-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: macos-arm64-ninja-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-
 
-      - name: Preserve unchanged source timestamps
-        if: steps.build_cache.outputs.cache-matched-key != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BUILD_CACHE_KEY: ${{ steps.build_cache.outputs.cache-matched-key }}
+      - name: Restore source timestamps
         run: |
-          [[ "$BUILD_CACHE_KEY" =~ -([0-9]+)-([0-9]+)$ ]]
-          previous_run=${BASH_REMATCH[1]}
-          previous_sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$previous_run" --jq '.head_sha')
           cd TBuild/tdesktop
-          if ! git cat-file -e "$previous_sha^{commit}" 2>/dev/null; then
-            git fetch --no-tags --depth=1 origin "$previous_sha"
-          fi
-          git ls-files --recurse-submodules -z | xargs -0 -n 100 touch -t 200001010000
-          while IFS= read -r -d '' path; do
-            if [ -f "$path" ]; then
-              touch "$path"
-            elif [ -d "$path" ]; then
-              find "$path" -type f -exec touch {} +
-            fi
-          done < <(git diff --name-only -z "$previous_sha" HEAD)
+          python3 .github/scripts/macos_cache_mtimes.py restore out/.ci-source-mtimes.json
+          python3 .github/scripts/macos_cache_mtimes.py save out/.ci-source-mtimes.json
 
       - name: Build Release
         id: build
@@ -166,11 +150,19 @@ jobs:
           df -h
 
       - name: Save intermediate build
+        id: save_build_cache
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: TBuild/tdesktop/out
           key: macos-arm64-ninja-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Remove superseded build cache
+        if: ${{ steps.save_build_cache.outcome == 'success' && steps.build_cache.outputs.cache-matched-key != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD_CACHE_KEY: ${{ steps.build_cache.outputs.cache-matched-key }}
+        run: gh cache delete "$OLD_CACHE_KEY" --repo "$GITHUB_REPOSITORY"
 
       - name: Upload macOS build
         if: env.BUILD_COMPLETE == 'true'
