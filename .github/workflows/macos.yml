@@ -118,6 +118,7 @@ jobs:
             -D DESKTOP_APP_SPECIAL_TARGET=mac \
             -D DESKTOP_APP_ENABLE_LTO=OFF \
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+            -D TDESKTOP_DISABLE_PACKER=ON \
             -D "TDESKTOP_API_ID=$API_ID" -D "TDESKTOP_API_HASH=$API_HASH"
           set +e
           cmake --build ../out --config Release --target Telegram --parallel 3 &
@@ -130,6 +131,7 @@ jobs:
           wait "$timer_pid" 2>/dev/null || true
           if [ "$result" -ne 0 ]; then
             echo "Build stopped with status $result; saving intermediate output."
+            echo "BUILD_FAILED=true" >> "$GITHUB_ENV"
             exit 0
           fi
           echo "BUILD_COMPLETE=true" >> "$GITHUB_ENV"
@@ -153,3 +155,7 @@ jobs:
           path: Xenon-macOS-arm64.zip
           if-no-files-found: error
           retention-days: 14
+
+      - name: Report build failure
+        if: env.BUILD_FAILED == 'true'
+        run: exit 1

@@ -106,6 +106,7 @@ jobs:
             -D DESKTOP_APP_SPECIAL_TARGET=linux \
             -D DESKTOP_APP_ENABLE_LTO=OFF \
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+            -D TDESKTOP_DISABLE_PACKER=ON \
             -D "TDESKTOP_API_ID=$API_ID" -D "TDESKTOP_API_HASH=$API_HASH"
           test -s out/Release/Telegram
           test -s out/Release/Updater

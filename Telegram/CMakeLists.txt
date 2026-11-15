@@ -3078,7 +3078,7 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
         )
     endif()
 
-    if (DESKTOP_APP_SPECIAL_TARGET OR TDESKTOP_BUILD_PACKER)
+    if ((DESKTOP_APP_SPECIAL_TARGET OR TDESKTOP_BUILD_PACKER) AND NOT TDESKTOP_DISABLE_PACKER)
         add_executable(Packer)
         init_target(Packer)
 
