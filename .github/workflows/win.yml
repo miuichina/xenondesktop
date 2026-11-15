@@ -2,15 +2,8 @@ name: Windows x64
 run-name: Windows x64 Release | ${{ github.event_name }} | ${{ github.ref_name }}
 
 "on":
-  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened]
-  push:
-    branches: [dev]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'changelog.txt'
 
 permissions:
   contents: read
@@ -23,7 +16,6 @@ concurrency:
 jobs:
   windows:
     name: Windows x64 Release
-    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip win]') }}
     runs-on: windows-2025
     timeout-minutes: 360
     env:
