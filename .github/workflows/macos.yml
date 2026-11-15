@@ -99,8 +99,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: TBuild/tdesktop/out
-          key: macos-arm64-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: macos-arm64-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-
+          key: macos-arm64-ninja-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: macos-arm64-ninja-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-
 
       - name: Build Release
         id: build
@@ -110,8 +110,8 @@ jobs:
         run: |
           cd TBuild/tdesktop/Telegram
           ./configure.sh \
-            -D CMAKE_CONFIGURATION_TYPES=Release \
-            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -GNinja \
+            -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_OSX_SYSROOT="$SDKROOT" \
             -D CMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
             -D CMAKE_OSX_ARCHITECTURES=arm64 \
@@ -136,9 +136,9 @@ jobs:
             exit 0
           fi
           echo "BUILD_COMPLETE=true" >> "$GITHUB_ENV"
-          test -s ../out/Release/Telegram.app/Contents/MacOS/Telegram
-          test -s ../out/Release/Telegram.app/Contents/Frameworks/Updater
-          ditto -c -k --sequesterRsrc --keepParent ../out/Release/Telegram.app "$GITHUB_WORKSPACE/Xenon-macOS-arm64.zip"
+          test -s ../out/Telegram.app/Contents/MacOS/Telegram
+          test -s ../out/Telegram.app/Contents/Frameworks/Updater
+          ditto -c -k --sequesterRsrc --keepParent ../out/Telegram.app "$GITHUB_WORKSPACE/Xenon-macOS-arm64.zip"
           df -h
 
       - name: Save intermediate build
@@ -146,7 +146,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: TBuild/tdesktop/out
-          key: macos-arm64-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: macos-arm64-ninja-objects-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload macOS build
         if: env.BUILD_COMPLETE == 'true'
