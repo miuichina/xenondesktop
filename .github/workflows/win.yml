@@ -4,6 +4,9 @@ run-name: Windows x64 Release | ${{ github.event_name }} | ${{ github.ref_name }
 "on":
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
+    branches: [dev]
+    paths-ignore: ['**.md', 'docs/**', 'changelog.txt']
 
 permissions:
   contents: read

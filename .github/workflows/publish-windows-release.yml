@@ -1,6 +1,9 @@
 name: Publish multi-platform release
 
 "on":
+  workflow_run:
+    workflows: [Windows x64, Linux x64, macOS]
+    types: [completed]
   workflow_dispatch:
     inputs:
       run_id:
@@ -27,8 +30,6 @@ concurrency:
 
 jobs:
   publish:
-    # Publication is paused while the multi-platform build is being prepared.
-    if: ${{ false }}
     outputs:
       published: ${{ steps.release.outputs.published }}
       build_sha: ${{ steps.release.outputs.build_sha }}
@@ -37,11 +38,45 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+      RUN_ID: ${{ inputs.run_id }}
       LINUX_RUN_ID: ${{ inputs.linux_run_id }}
       MACOS_RUN_ID: ${{ inputs.macos_run_id }}
     steps:
+      - name: Locate matching platform builds
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        run: |
+          sha='${{ github.event.workflow_run.head_sha }}'
+          message=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.commit.message')
+          if [[ "$message" == *'[skip release]'* ]]; then
+            echo 'Release and Telegram announcement skipped by commit message.'
+            echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
+            exit 0
+          fi
+          for attempt in {1..6}; do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&per_page=100")
+            ids=()
+            for workflow in win.yml linux.yml macos.yml; do
+              id=$(jq -r --arg path ".github/workflows/$workflow" '
+                [.workflow_runs[] | select(.path == $path and .head_branch == "dev" and
+                  .event == "push" and .conclusion == "success")]
+                | sort_by(.created_at) | last | .id // empty
+              ' <<< "$runs")
+              ids+=("$id")
+            done
+            if [[ -n "${ids[0]}" && -n "${ids[1]}" && -n "${ids[2]}" ]]; then
+              echo "RUN_ID=${ids[0]}" >> "$GITHUB_ENV"
+              echo "LINUX_RUN_ID=${ids[1]}" >> "$GITHUB_ENV"
+              echo "MACOS_RUN_ID=${ids[2]}" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Waiting for successful Windows, Linux, and macOS builds of $sha."
+          echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
+
       - name: Checkout release tooling and history
+        if: env.SKIP_PUBLISH != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: dev
@@ -49,6 +84,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify the successful build and download its EXE
+        if: env.SKIP_PUBLISH != 'true'
         shell: bash
         run: |
           [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo 'Invalid run ID'; exit 1; }

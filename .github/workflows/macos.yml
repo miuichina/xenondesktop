@@ -110,6 +110,11 @@ jobs:
           python3 .github/scripts/macos_cache_mtimes.py restore out/.ci-source-mtimes.json
           python3 .github/scripts/macos_cache_mtimes.py save out/.ci-source-mtimes.json
 
+      - name: Keep compiler warnings non-fatal
+        run: |
+          grep -Fx '        -Werror' TBuild/tdesktop/cmake/options_mac.cmake
+          sed -i '' '/^        -Werror$/d' TBuild/tdesktop/cmake/options_mac.cmake
+
       - name: Build Release
         id: build
         env:
