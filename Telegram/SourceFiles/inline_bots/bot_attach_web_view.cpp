@@ -3065,9 +3065,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		st::dropdownMenuWithIcons);
 	const auto bots = &peer->session().attachWebView();
 	const auto raw = result.get();
-	auto minimal = 0;
 	if (Data::CanSend(rightsPeer, ChatRestriction::SendPhotos, false)) {
-		++minimal;
 		raw->addAction(tr::lng_attach_photo_or_video(tr::now), [=] {
 			attach(true);
 		}, &st::menuIconPhoto);
@@ -3078,14 +3076,12 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		| ChatRestriction::SendMusic
 		| ChatRestriction::SendFiles;
 	if (Data::CanSendAnyOf(rightsPeer, fileTypes, false)) {
-		++minimal;
 		raw->addAction(tr::lng_attach_document(tr::now), [=] {
 			attach(false);
 		}, &st::menuIconFile);
 	}
 	const auto moneyIndex = int(raw->actions().size());
 	if (rightsPeer->canCreatePolls(false)) {
-		++minimal;
 		raw->addAction(tr::lng_polls_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
 			const auto source = action.options.scheduled
@@ -3104,7 +3100,6 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		}, &st::menuIconCreatePoll);
 	}
 	if (rightsPeer->canCreateTodoLists(false)) {
-		++minimal;
 		raw->addAction(tr::lng_todo_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
 			const auto source = action.options.scheduled
@@ -3144,7 +3139,6 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		}, &st::menuIconAddress);
 	}
 	if (Data::CanSend(rightsPeer, ChatRestriction::SendMusic, false)) {
-		++minimal;
 		raw->addAction(tr::lng_all_music(tr::now), [=] {
 			const auto box = controller->show(
 				Box(MusicAttachBox, controller, peer, actionFactory));
