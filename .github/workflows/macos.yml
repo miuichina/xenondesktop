@@ -146,6 +146,7 @@ jobs:
             -D TDESKTOP_DISABLE_PACKER=ON \
             -D "TDESKTOP_API_ID=$API_ID" -D "TDESKTOP_API_HASH=$API_HASH"
           (cd .. && python3 .github/scripts/macos_cache_mtimes.py restore out/.ci-source-mtimes.json && python3 .github/scripts/macos_cache_mtimes.py save out/.ci-source-mtimes.json)
+          ninja -C ../out build.ninja
           ninja -C ../out -n -d explain Telegram > ../out/ci-rebuild-reasons.log 2>&1
           awk '/^ninja explain:/ { print; if (++count == 100) exit }' ../out/ci-rebuild-reasons.log
           set +e
@@ -157,6 +158,7 @@ jobs:
           result=$?
           kill "$timer_pid" 2>/dev/null || true
           wait "$timer_pid" 2>/dev/null || true
+          (cd .. && python3 .github/scripts/macos_cache_mtimes.py save out/.ci-source-mtimes.json)
           if [ "$result" -ne 0 ]; then
             echo "Build stopped with status $result; saving intermediate output."
             echo "BUILD_FAILED=true" >> "$GITHUB_ENV"
