@@ -215,6 +215,7 @@ jobs:
         run: |
           python "$env:SOURCE_ROOT\.github\scripts\xenon_updates.py" package --source "$env:SOURCE_ROOT" --output "$env:GITHUB_WORKSPACE\artifact" --build-number '${{ github.run_number }}' --run-id '${{ github.run_id }}'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\artifact\Telegram.exe", "$env:GITHUB_WORKSPACE\artifact\Updater.exe" -DestinationPath "$env:GITHUB_WORKSPACE\artifact\Xenon-Windows-x64.zip"
 
       - name: Upload Windows EXE
         if: github.event_name != 'pull_request'
@@ -224,6 +225,7 @@ jobs:
           path: |
             artifact/Telegram.exe
             artifact/Updater.exe
+            artifact/Xenon-Windows-x64.zip
             artifact/td-update-*
             artifact/xenon-update.json
           if-no-files-found: error
