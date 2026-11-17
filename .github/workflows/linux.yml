@@ -113,7 +113,7 @@ jobs:
           mkdir -p artifact/Xenon
           cp out/Release/Telegram artifact/Xenon/Telegram
           cp out/Release/Updater artifact/Xenon/Updater
-          tar -C artifact -czf artifact/Xenon-Linux-x64.tar.gz Xenon
+          python3 -c 'import shutil; shutil.make_archive("artifact/Xenon-Linux-x64", "zip", "artifact", "Xenon")'
           df -h
 
       - name: Show compiler cache statistics
@@ -142,6 +142,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: Xenon-Linux-x64-Release
-          path: artifact/Xenon-Linux-x64.tar.gz
+          path: artifact/Xenon-Linux-x64.zip
           if-no-files-found: error
           retention-days: 14

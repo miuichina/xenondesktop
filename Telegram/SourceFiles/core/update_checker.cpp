@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/bytes.h"
 #include "base/unixtime.h"
+#include "base/zlib_help.h"
 #include "storage/localstorage.h"
 #include "core/application.h"
 #include "core/changelogs.h"
@@ -617,6 +618,23 @@ bool UnpackUpdate(
 	QByteArray compressed = input.readAll();
 	input.close();
 #endif // Q_OS_WIN || Q_OS_MAC
+
+#ifdef Q_OS_WIN
+	if (expectedVersion && compressed.startsWith("PK\003\004")) {
+		const auto name = "td-update-win-x64-"
+			+ QByteArray::number(Updates::UpdateVersionBase(expectedVersion));
+		auto archive = zlib::FileToRead(compressed);
+		auto package = archive.readFileContent(
+			name.constData(),
+			zlib::kCaseSensitive,
+			Loader::kMaxFileSize);
+		if (archive.error() != UNZ_OK || package.isEmpty()) {
+			LOG(("Update Error: Windows archive has no valid signed update package."));
+			return false;
+		}
+		compressed = std::move(package);
+	}
+#endif // Q_OS_WIN
 
 	if (!Updates::IsV2UpdateFile(compressed)) {
 		LOG(("Update Error: unsupported update format (missing v2 magic)."));

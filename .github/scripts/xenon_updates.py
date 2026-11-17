@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import time
+import zipfile
 
 
 def run(*args, **kwargs):
@@ -72,6 +73,7 @@ def build_metadata(source, output, build_number, run_id):
         "base_version": version,
         "build_number": build_number,
         "package": f"td-update-win-x64-{version}",
+        "archive": "Xenon-Windows-x64.zip",
     }, indent=2) + "\n", encoding="utf-8")
 
 
@@ -102,6 +104,12 @@ def package(source, output, build_number, run_id, private_key):
         signing.unlink(missing_ok=True)
     if not (output / metadata["package"]).is_file():
         raise ValueError("Packer did not produce the expected signed package")
+    with zipfile.ZipFile(output / metadata["archive"], "w") as archive:
+        for name in ("Telegram.exe", "Updater.exe"):
+            archive.write(output / name, name, compress_type=zipfile.ZIP_DEFLATED)
+        archive.write(output / metadata["package"], metadata["package"], compress_type=zipfile.ZIP_STORED)
+    if (output / metadata["archive"]).stat().st_size > 256 * 1024 * 1024:
+        raise ValueError("Windows ZIP exceeds the client update download limit")
 
 
 def release_notes(source, metadata_file, previous, output):
@@ -117,7 +125,9 @@ def release_notes(source, metadata_file, previous, output):
         history = history.encode("utf-8")[:100000].decode("utf-8", errors="ignore")
         history += f"\n\n[All commits](https://github.com/miuichina/xenondesktop/compare/{previous}...{current})\n"
     date = datetime.datetime.fromtimestamp(metadata["commit_time"], datetime.timezone.utc).isoformat()
-    notes = (f"Windows x64 · build {metadata['build_number']}\n\n"
+    labels = {"win": "Windows x64", "linux": "Linux x64", "macos": "macOS arm64"}
+    platforms = ", ".join(labels[name] for name in metadata.get("platforms", ["win"]))
+    notes = (f"{platforms} · build {metadata['build_number']}\n\n"
              f"Commit: `{current}`\n\nCommit time: {date}\n\n"
              f"<!-- xenon-update: {json.dumps(metadata, separators=(',', ':'))} -->\n\n"
              f"## Changes\n\n{history}")

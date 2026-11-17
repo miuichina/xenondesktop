@@ -8,15 +8,15 @@ name: Publish multi-platform release
     inputs:
       run_id:
         description: Successful Windows build run ID to publish without rebuilding
-        required: true
+        required: false
         type: string
       linux_run_id:
         description: Successful Linux build run ID for the same commit
-        required: true
+        required: false
         type: string
       macos_run_id:
         description: Successful macOS build run ID for the same commit
-        required: true
+        required: false
         type: string
 
 permissions:
@@ -35,140 +35,28 @@ jobs:
       build_sha: ${{ steps.release.outputs.build_sha }}
       tag: ${{ steps.release.outputs.tag }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
-      RUN_ID: ${{ inputs.run_id }}
-      LINUX_RUN_ID: ${{ inputs.linux_run_id }}
-      MACOS_RUN_ID: ${{ inputs.macos_run_id }}
     steps:
-      - name: Locate matching platform builds
-        if: github.event_name == 'workflow_run'
-        shell: bash
-        run: |
-          sha='${{ github.event.workflow_run.head_sha }}'
-          message=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.commit.message')
-          if [[ "$message" == *'[skip release]'* ]]; then
-            echo 'Release and Telegram announcement skipped by commit message.'
-            echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
-            exit 0
-          fi
-          for attempt in {1..6}; do
-            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&per_page=100")
-            ids=()
-            for workflow in win.yml linux.yml macos.yml; do
-              id=$(jq -r --arg path ".github/workflows/$workflow" '
-                [.workflow_runs[] | select(.path == $path and .head_branch == "dev" and
-                  .event == "push" and .conclusion == "success")]
-                | sort_by(.created_at) | last | .id // empty
-              ' <<< "$runs")
-              ids+=("$id")
-            done
-            if [[ -n "${ids[0]}" && -n "${ids[1]}" && -n "${ids[2]}" ]]; then
-              echo "RUN_ID=${ids[0]}" >> "$GITHUB_ENV"
-              echo "LINUX_RUN_ID=${ids[1]}" >> "$GITHUB_ENV"
-              echo "MACOS_RUN_ID=${ids[2]}" >> "$GITHUB_ENV"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "Waiting for successful Windows, Linux, and macOS builds of $sha."
-          echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
-
       - name: Checkout release tooling and history
-        if: env.SKIP_PUBLISH != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: dev
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify the successful build and download its EXE
-        if: env.SKIP_PUBLISH != 'true'
-        shell: bash
-        run: |
-          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo 'Invalid run ID'; exit 1; }
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > build.json
-          jq -e --arg repo "$GITHUB_REPOSITORY" '
-            .conclusion == "success" and
-            .head_branch == "dev" and
-            .head_repository.full_name == $repo and
-            .path == ".github/workflows/win.yml"
-          ' build.json > /dev/null
-          sha=$(jq -r '.head_sha' build.json)
-          echo "BUILD_SHA=$sha" >> "$GITHUB_ENV"
-          message=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.commit.message')
-          if [[ "$message" == *'[skip release]'* ]]; then
-            echo 'Release and Telegram announcement skipped by commit message.'
-            echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
-            exit 0
-          fi
-          for item in "$LINUX_RUN_ID:linux.yml" "$MACOS_RUN_ID:macos.yml"; do
-            id=${item%%:*}
-            workflow=${item#*:}
-            [[ "$id" =~ ^[0-9]+$ ]] || { echo 'Invalid run ID'; exit 1; }
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" | jq -e \
-              --arg repo "$GITHUB_REPOSITORY" --arg sha "$sha" --arg path ".github/workflows/$workflow" '
-                .conclusion == "success" and .head_branch == "dev" and
-                .head_repository.full_name == $repo and .head_sha == $sha and .path == $path
-              ' > /dev/null
-          done
-          if gh release view "windows-build-$RUN_ID" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo 'This build already has a release.'
-            echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
-            exit 0
-          fi
-          gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.commit.message | split("\n")[0]' > title.txt
-          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name Xenon-Windows-x64-Release --dir release
-          gh run download "$LINUX_RUN_ID" --repo "$GITHUB_REPOSITORY" --name Xenon-Linux-x64-Release --dir release
-          gh run download "$MACOS_RUN_ID" --repo "$GITHUB_REPOSITORY" --name Xenon-macOS-arm64-Release --dir release
-          test -s release/Xenon-Linux-x64.tar.gz
-          test -s release/Xenon-macOS-arm64.zip
-          test -s release/Telegram.exe
-          test -s release/Updater.exe
-          jq -e --arg sha "$sha" --arg tag "windows-build-$RUN_ID" --argjson number "$(jq '.run_number' build.json)" '
-            .format == 1 and .commit == $sha and .tag == $tag and .build_number == $number
-          ' release/xenon-update.json > /dev/null
-          package=$(jq -r '.package' release/xenon-update.json)
-          [[ "$package" =~ ^td-update-win-x64-[0-9]+$ ]] || exit 1
-          test -s "release/$package"
-          (cd release && sha256sum Telegram.exe Updater.exe td-update-* xenon-update.json Xenon-Linux-x64.tar.gz Xenon-macOS-*.zip > SHA256SUMS.txt)
+      - name: Locate enabled successful platform builds
+        run: python3 .github/scripts/publish_release.py prepare
 
-      - name: Prepare release history
+      - name: Download and verify platform artifacts
         if: env.SKIP_PUBLISH != 'true'
-        shell: bash
-        run: |
-          previous_tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq '.tagName' 2>/dev/null || true)
-          previous_sha=''
-          if [[ -n "$previous_tag" ]]; then
-            previous_sha=$(git rev-parse --verify "refs/tags/$previous_tag^{commit}")
-            if gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" --pattern xenon-update.json --dir previous 2>/dev/null; then
-              if ! jq -e --argjson current "$(jq '.build_number' release/xenon-update.json)" '.build_number < $current' previous/xenon-update.json > /dev/null; then
-                echo 'A newer build has already been published.'
-                echo 'SKIP_PUBLISH=true' >> "$GITHUB_ENV"
-                exit 0
-              fi
-            fi
-          fi
-          python .github/scripts/xenon_updates.py release-notes --source . --metadata release/xenon-update.json --previous "$previous_sha" --output notes.md
-          printf '\n\n[Build and logs](https://github.com/%s/actions/runs/%s)\n' "$GITHUB_REPOSITORY" "$RUN_ID" >> notes.md
+        run: python3 .github/scripts/publish_release.py download
 
       - name: Publish release
         id: release
         if: env.SKIP_PUBLISH != 'true'
-        shell: bash
-        run: |
-          tag="windows-build-$RUN_ID"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo 'This build already has a release.'
-            exit 0
-          fi
-          gh release create "$tag" release/Telegram.exe release/Updater.exe release/td-update-* release/xenon-update.json release/SHA256SUMS.txt release/Xenon-Linux-x64.tar.gz release/Xenon-macOS-*.zip \
-            --repo "$GITHUB_REPOSITORY" --target "$BUILD_SHA" \
-            --title "$(cat title.txt)" --notes-file notes.md --latest
-          echo "published=true" >> "$GITHUB_OUTPUT"
-          echo "build_sha=$BUILD_SHA" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        run: python3 .github/scripts/publish_release.py publish
 
   telegram:
     needs: publish

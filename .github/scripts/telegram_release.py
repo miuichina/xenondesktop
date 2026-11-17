@@ -1,4 +1,4 @@
-"""Announce a published Windows release without blocking its publication."""
+"""Announce a published release with buttons for its available platforms."""
 
 import html
 import json
@@ -27,8 +27,7 @@ def previous_release_commit(releases, current, tag):
         releases, key=lambda item: item.get("published_at") or "", reverse=True,
     ):
         if (release["tag_name"] == tag or release["draft"] or release["prerelease"]
-                or not release["tag_name"].startswith("windows-build-")
-                or not any(asset["name"] == "Telegram.exe" for asset in release["assets"])):
+                or not release["tag_name"].startswith(("windows-build-", "linux-build-", "macos-build-"))):
             continue
         commit = git("rev-parse", "--verify", f"refs/tags/{release['tag_name']}^{{commit}}")
         ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", commit, current])
@@ -44,26 +43,10 @@ def release_commits(previous, current):
     return git("log", "--topo-order", "--abbrev=7", "--format=%h: %s", *revision, "--").splitlines()
 
 
-def build_messages(short_sha, commits, asset, other_assets=()):
-    url = asset["browser_download_url"]
-    if not url.startswith("https://"):
-        raise ValueError("EXE download URL must use HTTPS")
+def build_messages(short_sha, commits):
     lines = [f"<b>Xenon desktop ({html.escape(short_sha)})</b>"]
     for commit in commits:
         lines.extend(html.escape(commit[i:i + 500]) for i in range(0, len(commit), 500))
-    lines.extend([
-        "",
-        f'<a href="{html.escape(url, quote=True)}">Download exe</a>'
-        f" ({asset['size'] / (1024 * 1024):.1f} MB)",
-    ])
-    for label, other in other_assets:
-        url = other["browser_download_url"]
-        if not url.startswith("https://"):
-            raise ValueError("Download URL must use HTTPS")
-        lines.append(
-            f'<a href="{html.escape(url, quote=True)}">{html.escape(label)}</a>'
-            f" ({other['size'] / (1024 * 1024):.1f} MB)"
-        )
     messages = []
     message = ""
     for line in lines:
@@ -80,15 +63,35 @@ def build_messages(short_sha, commits, asset, other_assets=()):
     return messages
 
 
-def send_message(token, chat_id, message):
+def download_buttons(assets):
+    buttons = []
+    for name, label in (
+            ("Xenon-Windows-x64.zip", "Download windows zip"),
+            ("Xenon-Linux-x64.zip", "Download linux zip"),
+            ("Xenon-macOS-arm64.zip", "Download macOS zip")):
+        if name not in assets:
+            continue
+        url = assets[name]["browser_download_url"]
+        if not url.startswith("https://"):
+            raise ValueError("Download URL must use HTTPS")
+        buttons.append([{"text": label, "url": url}])
+    if not buttons:
+        raise ValueError("Release has no downloadable archives")
+    return buttons
+
+
+def send_message(token, chat_id, message, buttons=None):
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML",
+        "link_preview_options": {"is_disabled": True},
+    }
+    if buttons:
+        payload["reply_markup"] = {"inline_keyboard": buttons}
     request = Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        data=json.dumps({
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML",
-            "link_preview_options": {"is_disabled": True},
-        }).encode("utf-8"),
+        data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -118,19 +121,13 @@ def main():
     release = github(f"repos/{repo}/releases/tags/{quote(tag, safe='')}")[0]
     if release["draft"] or release["prerelease"]:
         raise ValueError("Release is not published")
-    asset = next(asset for asset in release["assets"] if asset["name"] == "Telegram.exe")
     pages = github(f"repos/{repo}/releases?per_page=100")
     previous = previous_release_commit([item for page in pages for item in page], current, tag)
     assets = {item["name"]: item for item in release["assets"]}
-    other_assets = [
-        (label, assets[name]) for label, name in (
-            ("Download Linux x64", "Xenon-Linux-x64.tar.gz"),
-            ("Download macOS Apple Silicon", "Xenon-macOS-arm64.zip"),
-        )
-    ]
-    messages = build_messages(git("rev-parse", "--short=7", current), release_commits(previous, current), asset, other_assets)
-    for message in messages:
-        if not send_message(token, chat_id, message):
+    buttons = download_buttons(assets)
+    messages = build_messages(git("rev-parse", "--short=7", current), release_commits(previous, current))
+    for index, message in enumerate(messages):
+        if not send_message(token, chat_id, message, buttons if index == len(messages) - 1 else None):
             return
     print("Telegram announcement sent.")
 

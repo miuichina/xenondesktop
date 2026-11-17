@@ -242,13 +242,16 @@ void Service::metadata(const QJsonObject &release) {
 		_release.time = data.value(u"commit_time"_q).toInteger();
 		const auto base = data.value(u"base_version"_q).toInteger();
 		const auto build = data.value(u"build_number"_q).toInteger();
-		const auto name = data.value(u"package"_q).toString();
+		const auto package = data.value(u"package"_q).toString();
+		const auto archive = data.value(u"archive"_q).toString();
+		const auto name = archive.isEmpty() ? package : archive;
 		if (data.value(u"format"_q).toInt() != 1
 			|| data.value(u"tag"_q).toString() != _release.tag
 			|| !QRegularExpression(u"^[0-9a-f]{40}$"_q).match(_release.commit).hasMatch()
 			|| _release.time <= 0 || base <= 0 || base > 999999999
 			|| build <= 0 || build > std::numeric_limits<quint32>::max()
-			|| name != u"td-update-win-x64-"_q + QString::number(base)) {
+			|| package != u"td-update-win-x64-"_q + QString::number(base)
+			|| (!archive.isEmpty() && archive != u"Xenon-Windows-x64.zip"_q)) {
 			return fail();
 		}
 		_release.version = Updates::MakeUpdateVersion(quint32(base), quint32(build));

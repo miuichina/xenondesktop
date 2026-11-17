@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location(
@@ -35,7 +36,7 @@ class ReleaseTests(unittest.TestCase):
         updates.build_metadata(self.source, self.metadata, 42, 123)
 
     def git(self, *args):
-        return subprocess.run(["git", "-C", str(self.source), *args],
+        return subprocess.run(["git", "-c", "commit.gpgsign=false", "-C", str(self.source), *args],
                               check=True, capture_output=True, env=self.env).stdout.decode().strip()
 
     def commit(self, title):
@@ -51,6 +52,30 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(data["base_version"], 7003001)
         self.assertEqual(data["package"], "td-update-win-x64-7003001")
         self.assertEqual(data["tag"], "windows-build-123")
+        self.assertEqual(data["archive"], "Xenon-Windows-x64.zip")
+
+    def test_windows_zip_contains_executables_and_signed_update(self):
+        public = self.source / "Telegram/Resources/xenon-update"
+        public.mkdir(parents=True)
+        (public / "manifest.min.json").write_text('{"keys":[{"id":"test"}]}')
+        binaries = self.source / "out/Release"
+        binaries.mkdir(parents=True)
+        for name in ("Telegram.exe", "Updater.exe"):
+            (binaries / name).write_bytes(b"test executable")
+        output = self.root / "package"
+        original = updates.run
+        def packer(*args, **kwargs):
+            if args[0].endswith("Packer.exe"):
+                (output / "td-update-win-x64-7003001").write_bytes(b"signed update")
+                return b""
+            return original(*args, **kwargs)
+        with patch.object(updates, "run", side_effect=packer):
+            updates.package(self.source, output, 42, 123, "temporary test key")
+        with zipfile.ZipFile(output / "Xenon-Windows-x64.zip") as archive:
+            self.assertEqual(set(archive.namelist()), {"Telegram.exe", "Updater.exe", "td-update-win-x64-7003001"})
+            self.assertEqual(archive.read("td-update-win-x64-7003001"), b"signed update")
+            self.assertIsNone(archive.testzip())
+        self.assertFalse((output / "signing-key.pem").exists())
 
     def test_notes_include_every_intermediate_release(self):
         notes = self.root / "notes.md"
