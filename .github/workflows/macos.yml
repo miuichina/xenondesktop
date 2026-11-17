@@ -58,8 +58,9 @@ jobs:
           path: |
             TBuild/Libraries
             TBuild/ThirdParty
-          key: macos-arm64-release-libs-v2-${{ env.MAC_TOOLCHAIN_KEY }}-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py', 'TBuild/tdesktop/Telegram/build/build_mac.py') }}
+          key: macos-arm64-release-libs-v3-${{ env.MAC_TOOLCHAIN_KEY }}-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py', 'TBuild/tdesktop/Telegram/build/build_mac.py') }}
           restore-keys: |
+            macos-arm64-release-libs-v2-${{ env.MAC_TOOLCHAIN_KEY }}-
             macos-arm64-release-libs-v1-${{ env.MAC_TOOLCHAIN_KEY }}-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py', 'TBuild/tdesktop/Telegram/build/build_mac.py') }}-
 
       - name: Prepare dependencies
@@ -75,26 +76,30 @@ jobs:
             echo "Cached wallet engine source is missing; rebuilding its dependencies."
             rm -f Libraries/cache_keys/tlottie Libraries/cache_keys/wallet-engine Libraries/cache_keys/tdesktop_rust
           fi
+          if [ ! -s Libraries/crashpad/out/Release.arm64/crashpad_handler ]; then
+            rm -f Libraries/cache_keys/crashpad
+          fi
           ./tdesktop/Telegram/build/prepare/mac.sh silent
           test -x "Libraries/local/Qt-$QT_VERSION/libexec/moc"
           test -s Libraries/local/src/wallet_engine/wallet_engine.cpp
+          test -s Libraries/crashpad/out/Release.arm64/crashpad_handler
           df -h
 
       - name: Reduce dependency cache size
         if: ${{ !cancelled() && steps.prepare.outcome != 'skipped' }}
         run: |
           if [ -d TBuild/Libraries ]; then
-            find TBuild/Libraries '(' '(' ! '(' -name '*.a' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -name 'macos_toolchain.json' -o -path '*/local/*' -o -path '*/bin/*' -o -path '*/libexec/*' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' ')' -type f ')' -o -empty ')' -delete
+            find TBuild/Libraries '(' '(' ! '(' -name 'crashpad_handler' -o -name '*.a' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -name 'macos_toolchain.json' -o -path '*/local/*' -o -path '*/bin/*' -o -path '*/libexec/*' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' ')' -type f ')' -o -empty ')' -delete
           fi
 
       - name: Save dependencies
-        if: ${{ !cancelled() && steps.prepare.outcome == 'success' && steps.dependency_cache.outputs.cache-matched-key == '' }}
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' && steps.dependency_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
             TBuild/Libraries
             TBuild/ThirdParty
-          key: macos-arm64-release-libs-v2-${{ env.MAC_TOOLCHAIN_KEY }}-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py', 'TBuild/tdesktop/Telegram/build/build_mac.py') }}
+          key: macos-arm64-release-libs-v3-${{ env.MAC_TOOLCHAIN_KEY }}-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py', 'TBuild/tdesktop/Telegram/build/build_mac.py') }}
 
       - name: Restore intermediate build
         id: build_cache
@@ -108,7 +113,6 @@ jobs:
         run: |
           cd TBuild/tdesktop
           python3 .github/scripts/macos_cache_mtimes.py restore out/.ci-source-mtimes.json
-          python3 .github/scripts/macos_cache_mtimes.py save out/.ci-source-mtimes.json
 
       - name: Keep compiler warnings non-fatal
         run: |
@@ -134,6 +138,9 @@ jobs:
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
             -D TDESKTOP_DISABLE_PACKER=ON \
             -D "TDESKTOP_API_ID=$API_ID" -D "TDESKTOP_API_HASH=$API_HASH"
+          (cd .. && python3 .github/scripts/macos_cache_mtimes.py restore out/.ci-source-mtimes.json && python3 .github/scripts/macos_cache_mtimes.py save out/.ci-source-mtimes.json)
+          ninja -C ../out -n -d explain Telegram > ../out/ci-rebuild-reasons.log 2>&1
+          awk '/^ninja explain:/ { print; if (++count == 100) exit }' ../out/ci-rebuild-reasons.log
           set +e
           cmake --build ../out --config Release --target Telegram --parallel 3 &
           build_pid=$!

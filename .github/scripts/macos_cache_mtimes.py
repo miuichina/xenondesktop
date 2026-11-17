@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Keep source mtimes consistent with cached Clang precompiled headers."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,7 +32,13 @@ def restore(manifest):
     restored = 0
     for path in tracked_files():
         name = os.fspath(path)
-        if any(name == item or name.startswith(item + "/") for item in changed):
+        digest = data.get("hashes", {}).get(name)
+        if digest is not None:
+            if not path.is_file() or path.is_symlink():
+                continue
+            if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                continue
+        elif any(name == item or name.startswith(item + "/") for item in changed):
             continue
         mtime = data["files"].get(name)
         if mtime is None or not path.is_file() or path.is_symlink():
@@ -44,12 +51,14 @@ def restore(manifest):
 
 def save(manifest):
     files = {}
+    hashes = {}
     for path in tracked_files():
         if path.is_file() and not path.is_symlink():
             files[os.fspath(path)] = path.stat().st_mtime_ns
+            hashes[os.fspath(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
     manifest.parent.mkdir(parents=True, exist_ok=True)
     temporary = manifest.with_suffix(".tmp")
-    temporary.write_text(json.dumps({"commit": git("rev-parse", "HEAD").decode().strip(), "files": files}), encoding="utf-8")
+    temporary.write_text(json.dumps({"commit": git("rev-parse", "HEAD").decode().strip(), "files": files, "hashes": hashes}), encoding="utf-8")
     temporary.replace(manifest)
     print(f"Saved timestamps for {len(files)} source files.")
 
