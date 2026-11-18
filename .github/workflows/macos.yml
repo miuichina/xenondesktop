@@ -149,25 +149,18 @@ jobs:
           ninja -C ../out build.ninja
           ninja -C ../out -n -d explain Telegram > ../out/ci-rebuild-reasons.log 2>&1
           awk '/^ninja explain:/ { print; if (++count == 100) exit }' ../out/ci-rebuild-reasons.log
-          set +e
-          cmake --build ../out --config Release --target Telegram --parallel 3 &
-          build_pid=$!
-          ( sleep 18000; kill -INT "$build_pid" 2>/dev/null || true ) &
-          timer_pid=$!
-          wait "$build_pid"
-          result=$?
-          kill "$timer_pid" 2>/dev/null || true
-          wait "$timer_pid" 2>/dev/null || true
+          result=0
+          python3 ../.github/scripts/macos_build_checkpoint.py ninja -C ../out -j 3 Telegram || result=$?
           (cd .. && python3 .github/scripts/macos_cache_mtimes.py save out/.ci-source-mtimes.json)
           if [ "$result" -ne 0 ]; then
-            echo "Build stopped with status $result; saving intermediate output."
+            echo "Build exited with status $result; saving intermediate output."
             echo "BUILD_FAILED=true" >> "$GITHUB_ENV"
             exit 0
           fi
-          echo "BUILD_COMPLETE=true" >> "$GITHUB_ENV"
           test -s ../out/Telegram.app/Contents/MacOS/Telegram
           test -s ../out/Telegram.app/Contents/Frameworks/Updater
           ditto -c -k --sequesterRsrc --keepParent ../out/Telegram.app "$GITHUB_WORKSPACE/Xenon-macOS-arm64.zip"
+          echo "BUILD_COMPLETE=true" >> "$GITHUB_ENV"
           df -h
 
       - name: Save intermediate build
