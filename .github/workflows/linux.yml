@@ -59,6 +59,11 @@ jobs:
           cache-from: type=gha,scope=xenon-linux-release-v1
           cache-to: type=gha,scope=xenon-linux-release-v1,mode=max,ignore-error=true
 
+      - name: Check build Python XML support
+        run: |
+          docker run --rm --entrypoint /usr/bin/python3.11 xenon-linux-build \
+            -c 'import pyexpat; import xml.etree.ElementTree as ET; ET.fromstring("<release/>"); print("Python XML parser OK:", pyexpat.EXPAT_VERSION)'
+
       - name: Restore compiler cache
         id: compiler_cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
@@ -101,6 +106,7 @@ jobs:
             --entrypoint /usr/bin/env xenon-linux-build -u CCACHE_DISABLE \
             /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
             -D CMAKE_CONFIGURATION_TYPES=Release \
+            -D Python3_EXECUTABLE=/usr/bin/python3.11 \
             -D 'CMAKE_CXX_FLAGS=-fpch-preprocess -Wno-error=aggressive-loop-optimizations -Wno-error=range-loop-construct -Wno-error=unused-local-typedefs' \
             -D 'CMAKE_C_FLAGS=-Wno-error=stringop-overread' \
             -D DESKTOP_APP_SPECIAL_TARGET=linux \
