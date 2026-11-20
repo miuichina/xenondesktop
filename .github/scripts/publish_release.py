@@ -14,6 +14,7 @@ PLATFORMS = {
     "linux": ("linux.yml", "Xenon-Linux-x64-Release", "Xenon-Linux-x64.zip"),
     "macos": ("macos.yml", "Xenon-macOS-arm64-Release", "Xenon-macOS-arm64.zip"),
 }
+LINUX_UPDATE_METADATA = "xenon-update-linux-x64.json"
 
 
 def github(path):
@@ -91,6 +92,24 @@ def validate_windows(metadata, run, plan):
             and metadata.get("archive") == "Xenon-Windows-x64.zip")
 
 
+def prepare_linux_metadata(output, run, plan):
+    path = output / LINUX_UPDATE_METADATA
+    metadata = json.loads(path.read_text(encoding="utf-8"))
+    base = metadata.get("base_version")
+    if (metadata.get("format") != 1 or metadata.get("commit") != plan["sha"]
+            or metadata.get("tag") != f"linux-build-{run['id']}"
+            or metadata.get("build_number") != run["run_number"]
+            or type(base) is not int or not 0 < base <= 999999999
+            or metadata.get("package") != f"td-update-linux-x64-{base}"):
+        raise ValueError("Linux metadata does not match its successful build")
+    package = output / metadata["package"]
+    if not package.is_file() or not 0 < package.stat().st_size <= 256 * 1024 * 1024:
+        raise ValueError("Missing or invalid Linux update package")
+    metadata["tag"] = plan["tag"]
+    path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    return metadata
+
+
 def download():
     plan = json.loads(Path("release-plan.json").read_text())
     output = Path("release")
@@ -101,6 +120,8 @@ def download():
         archive = output / PLATFORMS[platform][2]
         if not archive.is_file() or not archive.stat().st_size:
             raise ValueError(f"Missing {platform} archive")
+    linux = (prepare_linux_metadata(output, plan["runs"]["linux"], plan)
+             if "linux" in plan["runs"] else None)
     if "win" in plan["runs"]:
         metadata = json.loads((output / "xenon-update.json").read_text())
         if not validate_windows(metadata, plan["runs"]["win"], plan):
@@ -111,6 +132,8 @@ def download():
         with zipfile.ZipFile(output / PLATFORMS["win"][2]) as archive:
             if set(archive.namelist()) != {"Telegram.exe", "Updater.exe", metadata["package"]}:
                 raise ValueError("Unexpected Windows ZIP contents")
+    elif linux:
+        metadata = linux.copy()
     else:
         timestamp = subprocess.check_output(["git", "show", "-s", "--format=%ct", plan["sha"]])
         metadata = {"commit": plan["sha"], "commit_time": int(timestamp),

@@ -22,6 +22,12 @@
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 
+#ifdef Q_OS_LINUX
+#include "platform/linux/update_install_linux.h"
+
+#include <ksandbox.h>
+#endif // Q_OS_LINUX
+
 #include <limits>
 
 #include "styles/style_layers.h"
@@ -35,6 +41,13 @@ constexpr auto kChangelogLimit = 8 * 1024 * 1024;
 constexpr auto kCheckPreference = "xenon-check-updates";
 constexpr auto kInstallPreference = "xenon-install-updates";
 constexpr auto kSkippedPreference = "xenon-skipped-release";
+#ifdef Q_OS_LINUX
+constexpr auto kMetadataName = u"xenon-update-linux-x64.json";
+constexpr auto kPackagePrefix = u"td-update-linux-x64-";
+#else // Q_OS_LINUX
+constexpr auto kMetadataName = u"xenon-update.json";
+constexpr auto kPackagePrefix = u"td-update-win-x64-";
+#endif // Q_OS_LINUX
 
 QString ApiRoot() {
 	return u"https://api.github.com/repos/miuichina/xenondesktop"_q;
@@ -59,7 +72,8 @@ public:
 
 private:
 	void get(const QString &url, Fn<void(QJsonDocument)> done);
-	void metadata(const QJsonObject &release);
+	void findRelease(int page);
+	void metadata(const QJsonArray &assets, const QString &prefix);
 	void compare(int page);
 	void offer();
 	void download();
@@ -167,12 +181,7 @@ void Service::check(bool manual, bool force) {
 	_totalCommits = 0;
 	_receivedCommits = 0;
 	_status = tr::lng_xenon_update_checking(tr::now);
-	get(ApiRoot() + u"/releases/latest"_q, [=](QJsonDocument result) {
-		if (!result.isObject()) {
-			return fail();
-		}
-		metadata(result.object());
-	});
+	findRelease(1);
 }
 
 void Service::get(const QString &url, Fn<void(QJsonDocument)> done) {
@@ -216,41 +225,62 @@ void Service::get(const QString &url, Fn<void(QJsonDocument)> done) {
 	});
 }
 
-void Service::metadata(const QJsonObject &release) {
-	_release.tag = release.value(u"tag_name"_q).toString();
-	if (!QRegularExpression(u"^windows-build-[0-9]+$"_q).match(_release.tag).hasMatch()
-		|| release.value(u"draft"_q).toBool()
-		|| release.value(u"prerelease"_q).toBool()) {
-		return fail();
-	}
-	const auto prefix = u"https://github.com/miuichina/xenondesktop/releases/download/"_q
-		+ _release.tag + '/';
-	auto metadataUrl = QString();
-	const auto assets = release.value(u"assets"_q).toArray();
-	for (const auto &entry : assets) {
-		const auto asset = entry.toObject();
-		if (asset.value(u"name"_q).toString() == u"xenon-update.json"_q) {
-			metadataUrl = asset.value(u"browser_download_url"_q).toString();
+void Service::findRelease(int page) {
+	constexpr auto kPageSize = 30;
+	get(ApiRoot() + u"/releases?per_page="_q + QString::number(kPageSize)
+		+ u"&page="_q + QString::number(page), [=](QJsonDocument document) {
+		const auto releases = document.array();
+		for (const auto &entry : releases) {
+			const auto release = entry.toObject();
+			const auto tag = release.value(u"tag_name"_q).toString();
+			if (!QRegularExpression(u"^(windows|linux)-build-[0-9]+$"_q).match(tag).hasMatch()
+				|| release.value(u"draft"_q).toBool()
+				|| release.value(u"prerelease"_q).toBool()) {
+				continue;
+			}
+			const QString prefix = u"https://github.com/miuichina/xenondesktop/releases/download/"_q
+				+ tag + '/';
+			const auto assets = release.value(u"assets"_q).toArray();
+			for (const auto &entry : assets) {
+				const auto asset = entry.toObject();
+				if (asset.value(u"name"_q).toString() == QStringView(kMetadataName)) {
+					if (asset.value(u"browser_download_url"_q).toString()
+							!= prefix + QStringView(kMetadataName)) {
+						return fail();
+					}
+					_release.tag = tag;
+					return metadata(assets, prefix);
+				}
+			}
 		}
-	}
-	if (metadataUrl != prefix + u"xenon-update.json"_q) {
-		return fail();
-	}
-	get(metadataUrl, [=](QJsonDocument document) {
+		if (releases.size() == kPageSize) {
+			findRelease(page + 1);
+		} else {
+			fail();
+		}
+	});
+}
+
+void Service::metadata(const QJsonArray &assets, const QString &prefix) {
+	get(prefix + QStringView(kMetadataName), [=](QJsonDocument document) {
 		const auto data = document.object();
 		_release.commit = data.value(u"commit"_q).toString();
 		_release.time = data.value(u"commit_time"_q).toInteger();
 		const auto base = data.value(u"base_version"_q).toInteger();
 		const auto build = data.value(u"build_number"_q).toInteger();
 		const auto package = data.value(u"package"_q).toString();
+#ifdef Q_OS_LINUX
+		const auto archive = QString();
+#else // Q_OS_LINUX
 		const auto archive = data.value(u"archive"_q).toString();
-		const auto name = archive.isEmpty() ? package : archive;
+#endif // Q_OS_LINUX
+		const auto &name = archive.isEmpty() ? package : archive;
 		if (data.value(u"format"_q).toInt() != 1
 			|| data.value(u"tag"_q).toString() != _release.tag
 			|| !QRegularExpression(u"^[0-9a-f]{40}$"_q).match(_release.commit).hasMatch()
 			|| _release.time <= 0 || base <= 0 || base > 999999999
 			|| build <= 0 || build > std::numeric_limits<quint32>::max()
-			|| package != u"td-update-win-x64-"_q + QString::number(base)
+			|| package != QStringView(kPackagePrefix) + QString::number(base)
 			|| (!archive.isEmpty() && archive != u"Xenon-Windows-x64.zip"_q)) {
 			return fail();
 		}
@@ -403,9 +433,24 @@ void Service::finish() {
 bool Supported() {
 #if defined Q_OS_WIN && defined _WIN64 && !defined _M_ARM64 && !defined OS_WIN_STORE
 	return !UpdaterDisabled();
+#elif defined Q_OS_LINUX && defined Q_PROCESSOR_X86_64
+	return !UpdaterDisabled() && !KSandbox::isInside();
 #else
 	return false;
 #endif
+}
+
+bool CanForceUpdate() {
+	if (!Supported()) {
+		return false;
+	}
+#ifdef Q_OS_LINUX
+	auto error = QString();
+	return Platform::GetUpdateInstallMode(cExeDir() + cExeName(), error)
+		== Platform::UpdateInstallMode::Writable;
+#else // Q_OS_LINUX
+	return true;
+#endif // Q_OS_LINUX
 }
 
 bool AutomaticallyCheck() {
@@ -440,7 +485,7 @@ void CheckNow() {
 }
 
 void ForceUpdate() {
-	if (Supported()) {
+	if (CanForceUpdate()) {
 		Instance().check(true, true);
 	}
 }

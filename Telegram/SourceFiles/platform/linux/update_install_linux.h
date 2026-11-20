@@ -31,13 +31,15 @@ enum class UpdateInstallMode {
 [[nodiscard]] std::optional<QString> ValidateProtectedUpdate(
 	const QByteArray &bytes,
 	bool beta,
-	QString &error);
+	QString &error,
+	quint64 expectedVersion = 0);
 [[nodiscard]] bool PrepareProtectedUpdate(
 	const QString &workingDirectory,
 	const QString &path,
 	const QByteArray &bytes,
 	bool beta,
-	QString &error);
+	QString &error,
+	quint64 expectedVersion = 0);
 [[nodiscard]] bool ClearUpdateData(
 	const QString &workingDirectory,
 	QString &error,

@@ -94,7 +94,7 @@ if (WIN32)
 endif()
 
 include(cmake/generate_update_keys.cmake)
-if (WIN32 AND NOT DESKTOP_APP_DISABLE_AUTOUPDATE)
+if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
     generate_update_keys(Telegram ${res_loc}/xenon-update)
 else()
     generate_update_keys(Telegram ${res_loc}/update)

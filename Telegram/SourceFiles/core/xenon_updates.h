@@ -3,6 +3,7 @@
 namespace Core::XenonUpdates {
 
 [[nodiscard]] bool Supported();
+[[nodiscard]] bool CanForceUpdate();
 [[nodiscard]] bool AutomaticallyCheck();
 [[nodiscard]] bool AutomaticallyInstall();
 void SetAutomaticallyCheck(bool enabled);

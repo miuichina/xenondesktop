@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QFileSystemWatcher>
+#include <QtCore/QSaveFile>
 
 #include <ksandbox.h>
 
@@ -78,6 +79,9 @@ constexpr auto kFrequentUpdateDelayRandPart = 300;
 // 64-bit (base << 32 | counter) version. 0x7FFFFFFF is the alpha marker.
 constexpr auto kVersionFileCanaryMarker = quint32(0x7FFFFFFE);
 constexpr auto kVersionFileForceMarker = quint32(0x58464F52);
+#ifdef Q_OS_LINUX
+constexpr auto kXenonReadyMarker = "xenon";
+#endif // Q_OS_LINUX
 
 #if !defined Q_OS_WIN && !defined Q_OS_MAC
 constexpr auto kFlatpakPortalService = "org.freedesktop.portal.Flatpak";
@@ -455,16 +459,17 @@ enum class ManifestAdoption {
 }
 
 [[nodiscard]] bool WriteUpdateReadyFile(const QString &readyFilePath) {
-	QFile readyFile(readyFilePath);
-	if (readyFile.open(QIODevice::WriteOnly)) {
-		if (readyFile.write("1", 1)) {
-			readyFile.close();
-		} else {
-			LOG(("Update Error: cant write ready file '%1'").arg(readyFilePath));
-			return false;
-		}
-	} else {
-		LOG(("Update Error: cant create ready file '%1'").arg(readyFilePath));
+	auto readyFile = QSaveFile(readyFilePath);
+#ifdef Q_OS_LINUX
+	const auto marker = XenonUpdates::Supported() ? kXenonReadyMarker : "1";
+#else // Q_OS_LINUX
+	const auto marker = "1";
+#endif // Q_OS_LINUX
+	const auto size = qstrlen(marker);
+	if (!readyFile.open(QIODevice::WriteOnly)
+		|| readyFile.write(marker, size) != size
+		|| !readyFile.commit()) {
+		LOG(("Update Error: cant write ready file '%1'").arg(readyFilePath));
 		return false;
 	}
 	return true;
@@ -598,7 +603,8 @@ bool UnpackUpdate(
 				filepath,
 				*content,
 				cInstallBetaVersion(),
-				error)) {
+				error,
+				expectedVersion)) {
 			LOG(("Update Error: %1").arg(error));
 			return false;
 		}
@@ -2213,6 +2219,16 @@ bool checkReadyUpdate() {
 		}
 		return false;
 	}
+#ifdef Q_OS_LINUX
+	if (XenonUpdates::Supported()) {
+		auto readyFile = QFile(readyFilePath);
+		if (!readyFile.open(QIODevice::ReadOnly)
+			|| readyFile.read(qstrlen(kXenonReadyMarker) + 1) != kXenonReadyMarker) {
+			ClearAll();
+			return false;
+		}
+	}
+#endif // Q_OS_LINUX
 
 	// check ready version
 	QString versionPath = readyPath + u"/tdata/version"_q;

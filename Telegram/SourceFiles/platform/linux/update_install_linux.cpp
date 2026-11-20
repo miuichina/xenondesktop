@@ -1177,12 +1177,17 @@ std::optional<QByteArray> ReadUpdatePackage(
 std::optional<QString> ValidateProtectedUpdate(
 		const QByteArray &bytes,
 		bool beta,
-		QString &error) {
+		QString &error,
+		quint64 expectedVersion) {
 	if (!RootModeSupported(error)) {
 		return std::nullopt;
 	}
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
-	if (!VerifyPackage(bytes, beta, error)) {
+	const auto verified = VerifyPackage(bytes, beta, error);
+	if (!verified) {
+		return std::nullopt;
+	} else if (expectedVersion && verified->envelope.version != expectedVersion) {
+		error = u"Package version does not match the release."_q;
 		return std::nullopt;
 	}
 	const auto installation = OpenInstallation(error);
@@ -1202,9 +1207,10 @@ bool PrepareProtectedUpdate(
 		const QString &path,
 		const QByteArray &bytes,
 		bool beta,
-		QString &error) {
+		QString &error,
+		quint64 expectedVersion) {
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
-	if (!ValidateProtectedUpdate(bytes, beta, error)) {
+	if (!ValidateProtectedUpdate(bytes, beta, error, expectedVersion)) {
 		return false;
 	}
 	const auto ready = ReadyUpdatePackagePath(workingDirectory);
