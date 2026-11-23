@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/ui/dialogs_bottom_button.h"
 
+#include "base/algorithm.h"
+#include "ui/arc_angles.h"
 #include "ui/color_contrast.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/painter.h"
@@ -18,6 +20,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Dialogs {
 namespace {
+
+constexpr auto kUpdateProgressDuration = crl::time(180);
 
 [[nodiscard]] QImage UpdateIcon() {
 	const auto iconSize = st::dialogsInstallUpdateIconSize;
@@ -102,6 +106,24 @@ BottomButton::BottomButton(
 
 void BottomButton::setText(const QString &text) {
 	_text = text;
+	update();
+}
+
+void BottomButton::setProgress(float64 progress) {
+	if (_progress == progress) {
+		return;
+	}
+	const auto previous = _progressAnimation.value(_progress);
+	_progress = progress;
+	_progressAnimation.stop();
+	if (previous >= 0. && progress >= 0.) {
+		_progressAnimation.start(
+			[=] { radialAnimationCallback(); },
+			previous,
+			progress,
+			kUpdateProgressDuration,
+			anim::easeOutCubic);
+	}
 	update();
 }
 
@@ -198,12 +220,28 @@ void BottomButton::paintEvent(QPaintEvent *e) {
 			p.drawText(r, _text, style::al_top);
 		}
 	} else if (isDisabled() && _loading) {
-		_loading->draw(
-			p,
-			QPoint(
-				(width() - st::dialogsLoadMoreLoading.size.width()) / 2,
-				(height() - st::dialogsLoadMoreLoading.size.height()) / 2),
-			width());
+		const auto &loading = st::dialogsLoadMoreLoading;
+		const auto position = QPoint(
+			(width() - loading.size.width()) / 2,
+			(height() - loading.size.height()) / 2);
+		if (_progress >= 0.) {
+			const auto progress = _progressAnimation.value(_progress);
+			const auto length = int(base::SafeRound(
+				progress * arc::kFullLength));
+			auto pen = QPen(loading.color->c);
+			pen.setWidth(loading.thickness);
+			pen.setCapStyle(Qt::RoundCap);
+			p.setPen(pen);
+			Ui::DrawRadial(p, QRect(position, loading.size), {
+				.shown = 1.,
+				.arcFrom = arc::kQuarterLength - length,
+				.arcLength = length,
+				.material = true,
+				.progress = progress,
+			});
+		} else {
+			_loading->draw(p, position, width());
+		}
 	} else {
 		if (_hasTextIcon) {
 			const auto size = _textIcon.size() / style::DevicePixelRatio();

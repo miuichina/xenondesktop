@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "ui/effects/animations.h"
 #include "ui/widgets/buttons.h"
 
 namespace style {
@@ -30,6 +31,7 @@ public:
 		bool hasTextIcon);
 
 	void setText(const QString &text);
+	void setProgress(float64 progress);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -46,6 +48,8 @@ private:
 	const bool _hasTextIcon;
 	bool _quiet = false;
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _loading;
+	Ui::Animations::Simple _progressAnimation;
+	float64 _progress = -1.;
 
 	QImage _textIcon;
 
