@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/iv_rich_page.h"
 #include "iv/iv_rich_page_quote.h"
 #include "iv/iv_rich_page_quote_builder.h"
+#include "base/options.h"
 #include "base/unixtime.h"
 #include "boxes/premium_preview_box.h"
 #include "core/application.h"
@@ -83,6 +84,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace HistoryView {
 namespace {
+
+base::options::toggle OptionReadOnAppearance({
+	.id = kOptionReadOnAppearance,
+	.name = "Mark as read on appearance",
+});
 
 constexpr auto kDeletedFadeDuration = crl::time(500);
 
@@ -1723,6 +1729,12 @@ bool Element::isHiddenByGroup() const {
 
 bool Element::isHidden() const {
 	return isHiddenByGroup();
+}
+
+bool Element::hasVisibleContent(int visibleTop, int visibleBottom) const {
+	const auto top = std::max(visibleTop, marginTop());
+	const auto bottom = std::min(visibleBottom, height() - marginBottom());
+	return !isHidden() && top < bottom;
 }
 
 void Element::overrideMedia(std::unique_ptr<Media> media) {

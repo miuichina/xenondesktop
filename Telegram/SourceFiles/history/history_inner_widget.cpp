@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/effects/spoiler_mess.h"
 #include "api/api_polls.h"
+#include "base/options.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
@@ -1602,6 +1603,8 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 	auto startEffects = base::flat_set<not_null<const Element*>>();
 	auto startInteractions = base::flat_set<not_null<const Element*>>();
 	const auto markingAsViewed = _widget->markingContentsRead();
+	const auto readOnAppearance = base::options::value<bool>(
+		HistoryView::kOptionReadOnAppearance);
 	const auto guard = gsl::finally([&] {
 		if (_pinnedItem) {
 			_translateTracker->add(_pinnedItem);
@@ -1654,11 +1657,16 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 			: isUnread
 			? yShown(top + height)
 			: yShown(top + height / 2);
+		if (isUnread && !isSponsored && (readOnAppearance
+				? view->hasVisibleContent(
+					_visibleAreaTop - top,
+					_visibleAreaBottom - top)
+				: markShown)) {
+			readTill = item;
+		}
 		if (markShown) {
 			if (isSponsored) {
 				session().sponsoredMessages().view(item->fullId());
-			} else if (isUnread) {
-				readTill = item;
 			}
 			if (markingAsViewed && item->hasUnwatchedEffect()) {
 				startEffects.emplace(view);
@@ -4633,15 +4641,20 @@ void HistoryInner::checkActivation() {
 	if (!_widget->markingMessagesRead()) {
 		return;
 	}
-	adjustCurrent(_visibleAreaBottom);
 	if (_history->loadedAtBottom() && _visibleAreaBottom >= height()) {
 		// Clear possible message notifications.
 		// Side-effect: Also clears all notifications from forum topics.
 		Core::App().notifications().clearFromHistory(_history);
 	}
+	if (base::options::value<bool>(HistoryView::kOptionReadOnAppearance)) {
+		update();
+		return;
+	}
+	adjustCurrent(_visibleAreaBottom);
 	if (_curHistory != _history || _history->isEmpty()) {
 		return;
 	}
+
 	auto block = _history->blocks[_curBlock].get();
 	auto view = block->messages[_curItem].get();
 	while (_curBlock > 0 || _curItem > 0) {

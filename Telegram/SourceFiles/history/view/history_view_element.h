@@ -63,6 +63,8 @@ struct ButtonParameters;
 
 namespace HistoryView {
 
+inline constexpr auto kOptionReadOnAppearance = "xenon-read-on-appearance";
+
 using PaintContext = Ui::ChatPaintContext;
 enum class BadgeRole : uchar;
 enum class PointState : char;
@@ -497,6 +499,7 @@ public:
 
 	[[nodiscard]] virtual int marginTop() const = 0;
 	[[nodiscard]] virtual int marginBottom() const = 0;
+	[[nodiscard]] bool hasVisibleContent(int visibleTop, int visibleBottom) const;
 
 	void addVerticalMargins(int top, int bottom);
 

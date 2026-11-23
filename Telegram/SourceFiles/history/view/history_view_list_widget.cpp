@@ -48,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
+#include "base/options.h"
 #include "core/core_settings.h"
 #include "core/phone_click_handler.h"
 #include "apiwrap.h"
@@ -3411,6 +3412,10 @@ void ListWidget::checkActivation() {
 		|| !markingMessagesRead()) {
 		return;
 	}
+	if (base::options::value<bool>(kOptionReadOnAppearance)) {
+		update();
+		return;
+	}
 	for (const auto &view : ranges::views::reverse(_items)) {
 		const auto bottom = itemTop(view) + view->height();
 		if (_visibleBottom + _itemsRevealHeight >= bottom) {
@@ -3476,6 +3481,8 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 	auto startInteractions = base::flat_set<not_null<const Element*>>();
 	const auto markingAsViewed = markingMessagesRead();
 	const auto markingContentRead = markingContentsRead();
+	const auto readOnAppearance = base::options::value<bool>(
+		kOptionReadOnAppearance);
 	const auto interactionsWindow = controllerOrNull();
 	const auto guard = gsl::finally([&] {
 		if (_translateTracker) {
@@ -3624,11 +3631,17 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 				: isUnread
 				? yShown(top + height)
 				: yShown(top + height / 2));
+		if (isUnread && !isSponsored && _context != Context::ChatPreview
+			&& (readOnAppearance
+				? view->hasVisibleContent(
+					_visibleTop - top,
+					_visibleBottom - top)
+				: markShown)) {
+			readTill = item;
+		}
 		if (markShown) {
 			if (isSponsored) {
 				session->sponsoredMessages().view(item->fullId());
-			} else if (isUnread) {
-				readTill = item;
 			}
 			if (markingContentRead
 				&& item->hasUnwatchedEffect()

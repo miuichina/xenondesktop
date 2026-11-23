@@ -11,6 +11,7 @@
 #include "data/components/sponsored_messages.h"
 #include "data/data_document.h"
 #include "dialogs/dialogs_entry.h"
+#include "history/view/history_view_element.h"
 #include "history/view/history_view_top_bar_blur.h"
 #include "history/view/history_view_top_bar_widget.h"
 #include "history/view/history_view_bottom_info.h"
@@ -150,6 +151,23 @@ const auto kMeta = BuildHelper({
 		},
 	});
 	builder.addDividerText(tr::lng_xenon_save_history_about());
+
+	auto &readOnAppearance = base::options::lookup<bool>(
+		HistoryView::kOptionReadOnAppearance);
+	const auto read = builder.addButton({
+		.id = u"xenon/read_on_appearance"_q,
+		.title = tr::lng_settings_xenon_read_on_appearance(),
+		.toggled = rpl::single(readOnAppearance.value()),
+		.keywords = { u"read"_q, u"unread"_q, u"message"_q, u"scroll"_q },
+	});
+	if (read) {
+		read->toggledChanges() | rpl::on_next([
+			option = &readOnAppearance
+		](bool checked) {
+			option->set(checked);
+		}, read->lifetime());
+	}
+	builder.addDividerText(tr::lng_settings_xenon_read_on_appearance_about());
 
 	auto &hideAds = base::options::lookup<bool>(Data::kOptionHideAds);
 	const auto ads = builder.addButton({
