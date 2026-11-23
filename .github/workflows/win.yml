@@ -114,15 +114,15 @@ jobs:
           $prepare = "$env:SOURCE_ROOT\Telegram\build\prepare\win.bat"
           $qtPatches = "$env:BUILD_ROOT\Libraries\win64\qt6_windows7"
           if (!(Get-ChildItem -LiteralPath $qtPatches -Filter '*.patch' -File -ErrorAction SilentlyContinue)) {
-            & $prepare silent qt6 qt6_windows7 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\qt-patches-cache-repair.log"
+            & $prepare silent qt6_windows7 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\qt-patches-cache-repair.log"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           $rust = "$env:BUILD_ROOT\Libraries\win64\tdesktop_rust"
           if ((Test-Path "$rust\out\lib\tdesktop_rust.lib") -and !(Test-Path "$rust\out\src\wallet_engine\wallet_engine.cpp")) {
-            & $prepare silent qt6 tlottie wallet-engine tdesktop_rust 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\cache-repair.log"
+            & $prepare silent tlottie wallet-engine tdesktop_rust 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\cache-repair.log"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          & $prepare silent qt6 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\dependencies.log"
+          & $prepare silent 2>&1 | Tee-Object "$env:GITHUB_WORKSPACE\logs\dependencies.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Reduce dependency cache size
@@ -177,7 +177,7 @@ jobs:
           TDESKTOP_API_HASH: ${{ github.event_name != 'pull_request' && secrets.TDESKTOP_API_HASH || '' }}
         run: |
           Set-Location "$env:SOURCE_ROOT\Telegram"
-          $common = @('qt6', '-G', 'Ninja Multi-Config', '-D', 'CMAKE_CONFIGURATION_TYPES=Release', '-D', 'CMAKE_BUILD_TYPE=Release', '-D', 'CMAKE_MSVC_DEBUG_INFORMATION_FORMAT:STRING=', '-D', 'CMAKE_COMPILE_WARNING_AS_ERROR=OFF')
+          $common = @('-G', 'Ninja Multi-Config', '-D', 'CMAKE_CONFIGURATION_TYPES=Release', '-D', 'CMAKE_BUILD_TYPE=Release', '-D', 'CMAKE_MSVC_DEBUG_INFORMATION_FORMAT:STRING=', '-D', 'CMAKE_COMPILE_WARNING_AS_ERROR=OFF')
           if ('${{ github.event_name }}' -eq 'pull_request') {
             $options = @('-D', 'TDESKTOP_API_TEST=ON', '-D', 'DESKTOP_APP_DISABLE_AUTOUPDATE=ON', '-D', 'DESKTOP_APP_DISABLE_CRASH_REPORTS=ON')
           } else {
