@@ -31,6 +31,7 @@ class FrameReader;
 
 namespace Editor {
 
+class CaptionBar;
 class Crop;
 class SegmentPlayer;
 class TimelineSeeker;
@@ -40,6 +41,7 @@ class VideoQualitySlider;
 struct VideoEditorDescriptor {
 	QString path;
 	QByteArray content;
+	QImage preview;
 	QSize dimensions;
 	crl::time duration = 0;
 	VideoEditorData data;
@@ -57,6 +59,8 @@ public:
 		VideoEditorDescriptor descriptor);
 	~VideoEditor();
 
+	void startPlayback();
+
 	[[nodiscard]] rpl::producer<VideoModifications> doneRequests() const {
 		return _done.events();
 	}
@@ -65,6 +69,10 @@ public:
 	}
 
 	[[nodiscard]] VideoModifications collect() const;
+
+	[[nodiscard]] TextWithTags caption() const;
+	[[nodiscard]] int period() const;
+	[[nodiscard]] bool edited() const;
 
 private:
 	void setupStreaming();
@@ -90,15 +98,32 @@ private:
 	void invalidateCoverPreview();
 	void togglePause();
 	void paintPlayBadge(QPainter &p);
+	void paintCanvas(QPainter &p);
 	void applyGeometry();
 	void paint(QPainter &p);
 	void keyPressEvent(QKeyEvent *e) override;
 	void keyReleaseEvent(QKeyEvent *e) override;
 	void stepFrame(int direction);
 	void confirm();
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void wheelEvent(QWheelEvent *e) override;
+	bool eventHook(QEvent *e) override;
+
+	void layoutCanvas(QRect contentRect);
+	[[nodiscard]] QRectF canvasMediaRect() const;
+	[[nodiscard]] QRectF canvasBasePlacement() const;
+	[[nodiscard]] float64 canvasScale() const;
+	[[nodiscard]] QSize frameRequestSize() const;
+	void clampCanvasShift();
+	void restoreCanvasPlacement(QRect rect);
+	void zoomCanvas(float64 factor, QPoint about);
+	void canvasChanged();
 
 	const QString _path;
 	const QByteArray _content;
+	const QImage _preview;
 	const QSize _dimensions;
 	const crl::time _duration = 0;
 	const VideoEditorData _data;
@@ -121,6 +146,7 @@ private:
 	std::unique_ptr<TimelineSeeker> _seeker;
 	base::unique_qptr<VideoQualitySlider> _quality;
 	base::unique_qptr<Ui::RpWidget> _controls;
+	base::unique_qptr<CaptionBar> _captionBar;
 	base::unique_qptr<Ui::RpWidget> _bar;
 	base::unique_qptr<Ui::IconButton> _rotate;
 	base::unique_qptr<Ui::IconButton> _flip;
@@ -151,6 +177,15 @@ private:
 	QRect _frameRect;
 	QTransform _frameMatrix;
 	QRect _innerRect;
+	QRect _contentRect;
+	QRect _canvasRect;
+	QRect _mediaRect;
+	float64 _canvasZoom = 1.;
+	QPointF _canvasShift;
+	std::optional<QRect> _canvasRestored;
+	QPointF _canvasDragShift;
+	std::optional<QPoint> _canvasPress;
+	bool _canvasMoved = false;
 	bool _dragging = false;
 	bool _userPaused = false;
 	bool _steppingFrame = false;

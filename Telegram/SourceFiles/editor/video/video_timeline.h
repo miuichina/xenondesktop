@@ -35,6 +35,7 @@ private:
 struct VideoTimelineDescriptor {
 	QString path;
 	QByteArray content;
+	QImage preview;
 	QSize dimensions;
 	std::shared_ptr<VideoTimelineFramesCache> cache;
 	crl::time duration = 0;
@@ -79,6 +80,7 @@ private:
 
 	const QString _path;
 	const QByteArray _content;
+	const QImage _preview;
 	const QSize _dimensions;
 	const std::shared_ptr<VideoTimelineFramesCache> _cache;
 
@@ -86,6 +88,7 @@ private:
 	std::unique_ptr<Loading> _loading;
 	base::Timer _reloadTimer;
 
+	Ui::Animations::Simple _framesShown;
 	Ui::Animations::Simple _dotActive;
 
 };

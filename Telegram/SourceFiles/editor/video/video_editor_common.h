@@ -20,6 +20,7 @@ struct VideoModifications {
 	// Target shorter side, zero means the original resolution is kept.
 	int quality = 0;
 	bool gif = false;
+	QRect canvasMediaRect;
 };
 
 struct VideoEditorData {
@@ -28,6 +29,7 @@ struct VideoEditorData {
 	QString hint;
 
 	QSize exactSize;
+	std::optional<Media::Encode::CanvasBackground> canvas;
 
 	crl::time maxDuration = 0;
 	crl::time minDuration = 0;
@@ -35,6 +37,7 @@ struct VideoEditorData {
 	bool removeAudio = false;
 	bool allowQuality = false;
 	bool frameOnly = false;
+	bool allowGif = true;
 	bool webmSticker = false;
 	// Set when the file is re-encoded even with no modifications at all.
 	bool transcodeAlways = false;
@@ -61,6 +64,7 @@ struct VideoEditorData {
 	const QByteArray &content,
 	const VideoModifications &modifications,
 	QSize dimensions,
-	int side);
+	int side,
+	const VideoEditorData *data = nullptr);
 
 } // namespace Editor

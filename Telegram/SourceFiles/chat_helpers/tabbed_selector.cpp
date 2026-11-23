@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_emoji_statuses.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "data/data_changes.h"
 #include "data/stickers/data_stickers.h"
 #include "data/stickers/data_custom_emoji.h" // AllowEmojiWithoutPremium.
@@ -410,6 +411,11 @@ TabbedSelector::TabbedSelector(
 		tabs.push_back(createTab(SelectorTab::Emoji, 0));
 		tabs.push_back(createTab(SelectorTab::Stickers, 1));
 		tabs.push_back(createTab(SelectorTab::Gifs, 2));
+	} else if (_mode == Mode::StoriesEditor) {
+		tabs.reserve(3);
+		tabs.push_back(createTab(SelectorTab::Stickers, 0));
+		tabs.push_back(createTab(SelectorTab::Emoji, 1));
+		tabs.push_back(createTab(SelectorTab::Gifs, 2));
 	} else if (mediaEditor()) {
 		tabs.reserve(2);
 		tabs.push_back(createTab(SelectorTab::Stickers, 0));
@@ -434,6 +440,7 @@ TabbedSelector::TabbedSelector(
 , _currentTabType(full()
 	? session().settings().selectorTab()
 	: (mediaEditor()
+		|| _mode == Mode::StoriesEditor
 		|| _mode == Mode::StickersOnly
 		|| _mode == Mode::StickersAndGifs
 		|| _mode == Mode::ChatIntro)
@@ -679,6 +686,8 @@ TabbedSelector::Tab TabbedSelector::createTab(SelectorTab type, int index) {
 					? EmojiMode::CustomOnly
 					: _mode == Mode::PeerTitle
 					? EmojiMode::PeerTitle
+					: _mode == Mode::UnicodeEmojiOnly
+					? EmojiMode::UnicodeOnly
 					: EmojiMode::Full),
 				.customTextColor = _customTextColor,
 				.paused = paused,
@@ -702,10 +711,13 @@ TabbedSelector::Tab TabbedSelector::createTab(SelectorTab type, int index) {
 		}
 		case SelectorTab::Gifs: {
 			using Descriptor = GifsListDescriptor;
+			const auto story = (_mode == Mode::StoriesEditor);
 			return object_ptr<GifsListWidget>(this, Descriptor{
 				.show = _show,
 				.paused = paused,
 				.st = &_st,
+				.inlineQueryPeer = story ? session().user().get() : nullptr,
+				.chooseBeforeLoad = story,
 			});
 		}
 		case SelectorTab::Masks: {
@@ -783,12 +795,27 @@ rpl::producer<> TabbedSelector::photoRequests() const {
 	return hasStickersTab() ? stickers()->photoRequests() : rpl::never<>();
 }
 
+auto TabbedSelector::reactionRequests() const
+-> rpl::producer<Data::ReactionId> {
+	return hasStickersTab()
+		? stickers()->reactionRequests()
+		: rpl::never<Data::ReactionId>();
+}
+
 rpl::producer<> TabbedSelector::audioRequests() const {
 	return hasStickersTab() ? stickers()->audioRequests() : rpl::never<>();
 }
 
 rpl::producer<> TabbedSelector::linkRequests() const {
 	return hasStickersTab() ? stickers()->linkRequests() : rpl::never<>();
+}
+
+rpl::producer<> TabbedSelector::locationRequests() const {
+	return hasStickersTab() ? stickers()->locationRequests() : rpl::never<>();
+}
+
+rpl::producer<> TabbedSelector::weatherRequests() const {
+	return hasStickersTab() ? stickers()->weatherRequests() : rpl::never<>();
 }
 
 auto TabbedSelector::choosingStickerUpdated() const
@@ -799,7 +826,11 @@ auto TabbedSelector::choosingStickerUpdated() const
 }
 
 rpl::producer<> TabbedSelector::cancelled() const {
-	return hasGifsTab() ? gifs()->cancelRequests() : nullptr;
+	return (_mode == Mode::UnicodeEmojiOnly)
+		? emoji()->escapes()
+		: hasGifsTab()
+		? gifs()->cancelRequests()
+		: nullptr;
 }
 
 rpl::producer<> TabbedSelector::checkForHide() const {

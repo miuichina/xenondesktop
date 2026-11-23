@@ -18,15 +18,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_custom_emoji.h"
 #include "dialogs/dialogs_main_list.h"
 #include "dialogs/ui/dialogs_layout.h"
-#include "core/application.h"
-#include "core/core_settings.h"
 #include "apiwrap.h"
 #include "api/api_unread_things.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_unread_things.h"
 #include "history/view/history_view_item_preview.h"
-#include "history/view/history_view_chat_section.h"
+#include "history/view/history_view_list_widget.h"
 #include "main/main_session.h"
 #include "base/unixtime.h"
 #include "ui/painter.h"
@@ -350,7 +348,8 @@ void ForumTopic::setRealRootId(MsgId realId) {
 	if (_rootId != realId) {
 		_rootId = realId;
 		_lastKnownServerMessageId = realId;
-		_replies = std::make_shared<RepliesList>(history(), _rootId);
+		_replies = std::make_shared<RepliesList>(history(), _rootId, this);
+		_replies->markJustCreated();
 		if (_sendActionPainter) {
 			_sendActionPainter->setTopic(nullptr);
 		}
@@ -832,6 +831,8 @@ int32 ForumTopic::colorId() const {
 void ForumTopic::applyColorId(int32 colorId) {
 	if (_colorId != colorId) {
 		_colorId = colorId;
+		_defaultIcon = QImage();
+		updateChatListEntry();
 		session().changes().topicUpdated(this, UpdateFlag::ColorId);
 	}
 }

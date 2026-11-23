@@ -53,7 +53,7 @@ namespace {
 
 constexpr auto kZoomStep = 10;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 [[nodiscard]] QString PrepareTerminalFailureName(
 		PrepareTerminalFailure failure) {
 	switch (failure) {
@@ -194,6 +194,7 @@ public:
 	bool updateContent(MarkdownArticleContent prepared, OpenOptions options);
 	[[nodiscard]] auto searchSources() const
 	-> std::vector<MarkdownArticleSearchSource>;
+	[[nodiscard]] rpl::producer<> searchSourcesChanges() const;
 	void setSearchMatches(
 		std::vector<MarkdownArticleSearchMatch> matches,
 		int current);
@@ -249,6 +250,8 @@ private:
 	Ui::LinkButton *_failureOpen = nullptr;
 	const std::shared_ptr<MathRenderer> _renderer;
 	std::shared_ptr<MarkdownArticle> _article;
+	rpl::event_stream<> _searchSourcesChanges;
+	rpl::lifetime _articleLifetime;
 	QString _pendingFragment;
 	int _devicePixelRatio = 0;
 	PendingEmbedState _pendingEmbed;
@@ -702,6 +705,7 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	closeEmbed();
 	if (failure.failed()) {
 		_article = nullptr;
+		_articleLifetime.destroy();
 		_footnotes.clear();
 		_scrollToAnimation.stop();
 		startScrollToTopButtonAnimation(false);
@@ -730,6 +734,7 @@ void MarkdownPreviewRoot::applyPreparedContent(
 
 	if (!_body) {
 		_article = nullptr;
+		_articleLifetime.destroy();
 		logPreparationSummary(failure, debug, prepareMs, 0);
 		return;
 	}
@@ -739,6 +744,8 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		_article = std::make_shared<MarkdownArticle>(
 			st::defaultMarkdown,
 			_renderer);
+		_article->searchSourcesChanges(
+		) | rpl::start_to_stream(_searchSourcesChanges, _articleLifetime);
 	}
 	_article->setContent(std::move(prepared));
 	_body->setClickHandlerContext(
@@ -825,6 +832,10 @@ auto MarkdownPreviewRoot::searchSources() const
 		: std::vector<MarkdownArticleSearchSource>();
 }
 
+rpl::producer<> MarkdownPreviewRoot::searchSourcesChanges() const {
+	return _searchSourcesChanges.events();
+}
+
 void MarkdownPreviewRoot::setSearchMatches(
 		std::vector<MarkdownArticleSearchMatch> matches,
 		int current) {
@@ -888,6 +899,13 @@ auto MarkdownPreviewSearchSources(Ui::RpWidget *preview)
 	return root
 		? root->searchSources()
 		: std::vector<MarkdownArticleSearchSource>();
+}
+
+rpl::producer<> MarkdownPreviewSearchSourcesChanges(Ui::RpWidget *preview) {
+	if (const auto root = dynamic_cast<MarkdownPreviewRoot*>(preview)) {
+		return root->searchSourcesChanges();
+	}
+	return rpl::never<>();
 }
 
 bool ExpandMarkdownPreviewDetails(
@@ -1103,7 +1121,7 @@ void MarkdownPreviewRoot::logPreparationSummary(
 		const PrepareDebugStats &debug,
 		int prepareMs,
 		int layoutMs) const {
-#ifndef NDEBUG
+#ifdef _DEBUG
 	const auto counters = _renderer ? _renderer->debugCounters() : FormulaDebugCounters();
 	const auto reason = PrepareFailureReasonText(failure);
 	DEBUG_LOG((

@@ -17,7 +17,6 @@ namespace {
 
 using namespace FFmpeg;
 
-constexpr auto kMaxDecodeSpan = crl::time(10000);
 constexpr auto kForwardDecodeWindow = crl::time(3000);
 constexpr auto kMaxDecodeArea = 4096 * int64(4096);
 constexpr auto kMaxPositionCache = 2048;
@@ -463,7 +462,6 @@ QImage Extractor::take(
 		seekTo(position);
 	}
 	auto has = false;
-	auto firstAt = crl::time(-1);
 	while (true) {
 		if (!receiveInto(_frame.get(), cancel)) {
 			break;
@@ -471,17 +469,12 @@ QImage Extractor::take(
 		const auto at = FramePosition(_frame.get(), stream);
 		if (at >= 0) {
 			_decodedPosition = at;
-			if (firstAt < 0) {
-				firstAt = at;
-			}
 		}
 		keepDecodedFrame(at);
 		cacheDecodedFrame(at, position, cache);
 		has = true;
 		av_frame_unref(_frame.get());
 		if (at < 0 || at >= position) {
-			break;
-		} else if (!exact && firstAt >= 0 && at - firstAt > kMaxDecodeSpan) {
 			break;
 		}
 	}

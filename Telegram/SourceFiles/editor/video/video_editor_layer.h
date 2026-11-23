@@ -26,7 +26,7 @@ namespace Editor {
 
 struct VideoEditorDescriptor;
 
-inline constexpr auto kProfileVideoSide = 800;
+inline constexpr auto kProfileVideoSide = 640;
 inline constexpr auto kProfileVideoMaxDuration = crl::time(9600);
 inline constexpr auto kProfileVideoMinDuration = crl::time(1000);
 inline constexpr auto kProfileVideoFps = 30.;
@@ -70,6 +70,7 @@ void OpenWithPreparedVideoFile(
 	int index,
 	int previewWidth,
 	Fn<void(bool ok)> &&doneCallback,
-	int sideLimit = 0);
+	int sideLimit = 0,
+	bool allowGif = true);
 
 } // namespace Editor

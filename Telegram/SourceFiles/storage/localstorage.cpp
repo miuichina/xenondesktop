@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "window/themes/window_theme.h"
+#include "window/window_saved_windows.h"
 #include "lang/lang_instance.h"
 
 #include <QtCore/QDirIterator>
@@ -62,7 +63,7 @@ using Database = Storage::Cache::Database;
 
 QString _basePath, _userBasePath, _userDbPath;
 
-TaskQueue *_localLoader = nullptr;
+auto _localLoader = (TaskQueue*)nullptr;
 
 QByteArray _settingsSalt;
 
@@ -620,13 +621,16 @@ bool readUpdateManifest(QByteArray *manifest, QByteArray *signature) {
 	if (Core::UpdaterDisabled()) {
 		return false;
 	}
-	QFile f(updateManifestFile());
-	if (!f.open(QIODevice::ReadOnly)) {
-		return false;
-	}
 	constexpr auto kSignatureSize = 64;
 	constexpr auto kMaxManifestSize = 256 * 1024;
-	const auto content = f.readAll();
+	const auto info = QFileInfo(updateManifestFile());
+	QFile f(info.filePath());
+	if (info.isSymLink()
+		|| !info.isFile()
+		|| !f.open(QIODevice::ReadOnly)) {
+		return false;
+	}
+	const auto content = f.read(kSignatureSize + kMaxManifestSize + 1);
 	if (content.size() <= kSignatureSize
 		|| content.size() > kSignatureSize + kMaxManifestSize) {
 		return false;
@@ -848,6 +852,10 @@ void reset() {
 	Window::Theme::Background()->reset();
 	_oldSettingsVersion = 0;
 	Core::App().settings().resetOnLastLogout();
+	Core::App().reseedWindowInSettings();
+	if (const auto saved = Core::App().savedWindows()) {
+		saved->resetOnLastLogout();
+	}
 	writeSettings();
 }
 

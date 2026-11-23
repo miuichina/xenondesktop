@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/object_ptr.h"
 #include "base/timer.h"
 #include "data/data_messages.h"
+#include "dialogs/dialogs_archive_slide.h"
+#include "dialogs/dialogs_removed_row_slide.h"
 #include "dialogs/ui/dialogs_quick_action_context.h"
 #include "dialogs/dialogs_community_rows_view.h"
 #include "dialogs/dialogs_inner_widget_accessibility.h"
@@ -440,7 +442,6 @@ private:
 		CachedRow &cached,
 		const Ui::PaintContext &context);
 
-	bool addBotAppRipple(QPoint origin, Fn<void()> updateCallback);
 	bool addQuickActionRipple(not_null<Row*> row, Fn<void()> updateCallback);
 
 	bool addRightButtonRipple(QPoint origin, Fn<void()> updateCallback);
@@ -482,6 +483,9 @@ private:
 	void updateCommunityRequestableGeometry();
 	void setCommunityPressed(int pressed);
 	[[nodiscard]] int skipTopHeight() const;
+	[[nodiscard]] int archiveBandHeight() const;
+	void refreshWithArchiveSlide();
+	void prepareRemovedRowSlide(not_null<Row*> row);
 	[[nodiscard]] int collapsedRowsOffset() const;
 	[[nodiscard]] int dialogsOffset() const;
 	[[nodiscard]] int shownHeight(int till = -1) const;
@@ -672,6 +676,14 @@ private:
 		_cachedRows.clear();
 		update();
 	}};
+	ArchiveSlide _archiveSlide{[this] {
+		_rowsScrollCache.markScrolling();
+		update(0, _visibleTop, width(), _visibleBottom - _visibleTop);
+	}};
+	RemovedRowSlide _removedRowSlide{[this] {
+		_rowsScrollCache.markScrolling();
+		update(0, _visibleTop, width(), _visibleBottom - _visibleTop);
+	}};
 	bool _selectedChatTypeFilter = false;
 	bool _pressedChatTypeFilter = false;
 	bool _selectedMorePosts = false;
@@ -687,7 +699,6 @@ private:
 	bool _pressedTopicJump = false;
 
 	RightButton *_pressedRightButtonData = nullptr;
-	bool _pressedRightButtonSponsored = false;
 	bool _selectedRightButton = false;
 	bool _pressedRightButton = false;
 

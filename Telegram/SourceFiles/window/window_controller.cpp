@@ -27,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/emoji_config.h"
 #include "chat_helpers/emoji_sets_manager.h"
+#include "window/window_columns.h"
+#include "window/window_logout_box.h"
 #include "window/window_session_controller.h"
 #include "window/themes/window_theme_editor.h"
 #include "ui/boxes/confirm_box.h"
@@ -113,7 +115,8 @@ Controller::Controller(CreateArgs &&args)
 : _id(args.id)
 , _isActiveTimer([=] { updateIsActive(); })
 , _widget(this)
-, _adaptive(std::make_unique<Adaptive>()) {
+, _adaptive(std::make_unique<Adaptive>())
+, _columns(std::make_unique<Columns>(this)) {
 	_widget.init();
 }
 
@@ -164,6 +167,10 @@ void Controller::showAccount(
 	_accountLifetime.destroy();
 	_id.account = account;
 	Core::App().checkWindowId(this);
+
+	if (!prevAccount && Core::App().isWindowInSettings(this)) {
+		_columns->seedFirstWindow();
+	}
 
 	if (!isPrimary()) {
 		_id.account->sessionChanges(
@@ -481,6 +488,10 @@ bool Controller::isLayerShown() const {
 	return _widget.ui_isLayerShown();
 }
 
+rpl::producer<bool> Controller::layerShownValue() const {
+	return _widget.ui_layerShownValue();
+}
+
 rpl::producer<bool> Controller::boxShownValue() const {
 	return _widget.ui_boxShownValue();
 }
@@ -590,27 +601,22 @@ QString LogoutConfirmationText(Main::Account *account) {
 	return result;
 }
 
+void Controller::showLogoutOptions() {
+	if (const auto controller = sessionController();
+		controller && !Core::App().passcodeLocked()) {
+		ShowLogoutOptions(this, &controller->session());
+	} else {
+		showLogoutConfirmation();
+	}
+}
+
 void Controller::showLogoutConfirmation() {
 	const auto account = Core::App().passcodeLocked()
 		? nullptr
 		: sessionController()
 		? &sessionController()->session().account()
 		: nullptr;
-	const auto weak = base::make_weak(account);
-	const auto callback = [=](Fn<void()> close) {
-		if (!account || weak) {
-			Core::App().logoutWithChecks(account);
-		}
-		if (close) {
-			close();
-		}
-	};
-	show(Ui::MakeConfirmBox({
-		.text = LogoutConfirmationText(account),
-		.confirmed = callback,
-		.confirmText = tr::lng_settings_logout(),
-		.confirmStyle = &st::attentionBoxButton,
-	}));
+	ShowLogoutConfirmation(this, account);
 }
 
 void Controller::showPasscodeClearFailed(Fn<bool()> retry) {
@@ -632,6 +638,10 @@ void Controller::showPasscodeClearFailed(Fn<bool()> retry) {
 
 Window::Adaptive &Controller::adaptive() const {
 	return *_adaptive;
+}
+
+Window::Columns &Controller::columns() const {
+	return *_columns;
 }
 
 void Controller::openInMediaView(Media::View::OpenRequest &&request) {

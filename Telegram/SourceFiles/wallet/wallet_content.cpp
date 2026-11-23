@@ -119,9 +119,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "wallet/wallet_gift_move_presentation.h"
 #include "wallet/wallet_key_protection.h"
 #include "wallet/wallet_move_to_gifts.h"
+#include "wallet/wallet_onchain_gift_presentation.h"
 #include "wallet/wallet_onramp.h"
 #include "wallet/wallet_palette.h"
 #include "wallet/wallet_rates.h"
+#include "wallet/wallet_row_address_chips.h"
 #include "wallet/wallet_send_preparation.h"
 #include "wallet/wallet_sending_effects.h"
 #include "wallet/wallet_session.h"
@@ -1249,6 +1251,7 @@ enum class RowAvatar {
 
 struct HistoryRowContent {
 	QString title;
+	QString address;
 	QString subtitle;
 	QString date;
 	int64 amountNano = 0;
@@ -1258,6 +1261,7 @@ struct HistoryRowContent {
 	RowAvatar avatar = RowAvatar::Out;
 	PeerData *peer = nullptr;
 	bool itemAmount = false;
+	TransferOnchainGift onchainGift = TransferOnchainGift::None;
 	QString collectible;
 	std::optional<CollectibleRecord> collectibleRecord;
 
@@ -1507,6 +1511,7 @@ struct HistoryRowText {
 	Ui::Text::String date;
 	Ui::Text::String major;
 	Ui::Text::String minor;
+	std::optional<AddressChips> address;
 	bool subtitleShown = false;
 	bool chip = false;
 };
@@ -1551,6 +1556,7 @@ struct HistoryRowText {
 		.major = HistoryRowLabelText(
 			st::walletRowAmountMajorLabel,
 			amount.major),
+		.address = AddressChips::FromAddress(content.address),
 		.subtitleShown = !content.subtitle.isEmpty(),
 		.chip = content.itemAmount,
 	};
@@ -1574,11 +1580,13 @@ struct HistoryRowText {
 			text.major.maxWidth() + text.minor.maxWidth()),
 		0);
 	auto result = ComputeHistoryRowLayout({
-		.title = HistoryRowLabelHeight(
-			st::walletRowTitleLabel,
-			text.title,
-			titleWidth,
-			true),
+		.title = (text.address
+			? LabelLineHeight(st::walletRowTitleLabel)
+			: HistoryRowLabelHeight(
+				st::walletRowTitleLabel,
+				text.title,
+				titleWidth,
+				true)),
 		.subtitle = (text.subtitleShown
 			? std::make_optional(HistoryRowLabelHeight(
 				st::walletRowSubtitleLabel,
@@ -1646,18 +1654,18 @@ class HistoryRowButton final : public Ui::SettingsButton {
 public:
 	using Ui::SettingsButton::SettingsButton;
 
-	void setPaintUnderRipple(Fn<void(Painter&)> paint);
+	void addPaintUnderRipple(Fn<void(Painter&)> paint);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
 
 private:
-	Fn<void(Painter&)> _paintUnderRipple;
+	std::vector<Fn<void(Painter&)>> _paintUnderRipple;
 
 };
 
-void HistoryRowButton::setPaintUnderRipple(Fn<void(Painter&)> paint) {
-	_paintUnderRipple = std::move(paint);
+void HistoryRowButton::addPaintUnderRipple(Fn<void(Painter&)> paint) {
+	_paintUnderRipple.push_back(std::move(paint));
 	update();
 }
 
@@ -1665,8 +1673,8 @@ void HistoryRowButton::paintEvent(QPaintEvent *e) {
 	auto p = Painter(this);
 	const auto over = (isOver() || isDown()) && !isDisabled();
 	paintBg(p, e->rect(), over);
-	if (_paintUnderRipple) {
-		_paintUnderRipple(p);
+	for (const auto &paint : _paintUnderRipple) {
+		paint(p);
 	}
 	paintRipple(p, 0, 0);
 	const auto outerw = width();
@@ -1696,6 +1704,9 @@ void PaintHistoryRowChipArtwork(
 		int outerWidth,
 		const HistoryRowChipState &state,
 		const std::shared_ptr<CollectibleMedia> &media) {
+	if (state.key.isEmpty()) {
+		return;
+	}
 	const auto side = st::walletRowIconSize;
 	const auto radius = st::walletCollectibleThumbRadius;
 	const auto rtl = style::RightToLeft();
@@ -1722,11 +1733,12 @@ void PaintHistoryRowChipText(
 		int outerWidth,
 		const HistoryRowChipState &state) {
 	const auto side = st::walletRowIconSize;
+	const auto artwork = state.key.isEmpty() ? 0 : side;
 	const auto plate = std::min(state.natural, outerWidth);
 	const auto rtl = style::RightToLeft();
 	const auto plateLeft = rtl ? (outerWidth - plate) : 0;
 	const auto available = plate
-		- side
+		- artwork
 		- st::walletChipTextSkip
 		- st::walletChipPadding.right();
 	if (available <= 0) {
@@ -1734,7 +1746,7 @@ void PaintHistoryRowChipText(
 	}
 	const auto textLeft = rtl
 		? (plateLeft + st::walletChipPadding.right())
-		: (side + st::walletChipTextSkip);
+		: (artwork + st::walletChipTextSkip);
 	const auto titleHeight = st::walletCollectibleTitleStyle.font->height;
 	const auto subtitleHeight = st::walletRowDateLabel.style.font->height;
 	const auto top = (side
@@ -1761,15 +1773,20 @@ void PaintHistoryRowChipText(
 void TrackHistoryRowChip(
 		not_null<HistoryRowChipState*> state,
 		std::shared_ptr<CollectibleMedia> media,
-		QString address,
-		const std::optional<CollectibleRecord> &record,
+		const HistoryRowContent &content,
 		Fn<void()> repaint,
 		rpl::lifetime &lifetime) {
+	const auto &address = content.collectible;
+	const auto &record = content.collectibleRecord;
+	const auto action = content.onchainGift;
+	const auto amountNano = content.amountNano;
 	const auto served = record && record->gift;
 	const auto key = served ? media->resolveServed(*record) : address;
 	state->key = key;
 	const auto refresh = [=] {
-		const auto view = media->view(key);
+		const auto view = key.isEmpty()
+			? CollectibleView{ .name = tr::lng_wallet_chip_gift(tr::now) }
+			: media->view(key);
 		state->kind = view.kind;
 		using Kind = Gram::NftKind;
 		state->title.setMarkedText(
@@ -1779,10 +1796,12 @@ void TrackHistoryRowChip(
 				: (view.kind == Kind::TelegramNumber)
 				? Ui::Text::Semibold(Ui::FormatPhone(view.key))
 				: CollectibleTitleText(view)));
-		state->subtitle.setText(
-			st::walletRowDateLabel.style,
-			CollectibleKindText(view));
-		state->natural = st::walletRowIconSize
+		SetCollectibleChipSubtitle(
+			state->subtitle,
+			view,
+			action,
+			amountNano);
+		state->natural = (key.isEmpty() ? 0 : st::walletRowIconSize)
 			+ st::walletChipTextSkip
 			+ std::max(state->title.maxWidth(), state->subtitle.maxWidth())
 			+ st::walletChipPadding.right();
@@ -1795,7 +1814,7 @@ void TrackHistoryRowChip(
 	) | rpl::filter(mine) | rpl::on_next(refresh, lifetime);
 	media->repaint(
 	) | rpl::filter(mine) | rpl::on_next(repaint, lifetime);
-	if (!served) {
+	if (!served && !key.isEmpty()) {
 		media->resolveBackground(address);
 	}
 	refresh();
@@ -1805,8 +1824,7 @@ void AddHistoryRowChip(
 		not_null<Ui::VerticalLayout*> inner,
 		not_null<HistoryRowButton*> button,
 		std::shared_ptr<CollectibleMedia> media,
-		QString address,
-		const std::optional<CollectibleRecord> &record) {
+		const HistoryRowContent &content) {
 	Ui::AddSkip(inner, st::walletChipTopSkip);
 	const auto chip = inner->add(object_ptr<Ui::FixedHeightWidget>(
 		inner,
@@ -1823,7 +1841,7 @@ void AddHistoryRowChip(
 		PaintHistoryRowChipArtwork(p, chip->width(), *state, media);
 		PaintHistoryRowChipText(p, chip->width(), *state);
 	}, chip->lifetime());
-	button->setPaintUnderRipple([=](Painter &p) {
+	button->addPaintUnderRipple([=](Painter &p) {
 		const auto origin = Ui::MapFrom(button, chip, QPoint());
 		p.translate(origin);
 		PaintHistoryRowChipPlate(p, chip->width(), *state);
@@ -1832,8 +1850,7 @@ void AddHistoryRowChip(
 	TrackHistoryRowChip(
 		state,
 		media,
-		address,
-		record,
+		content,
 		repaint,
 		chip->lifetime());
 }
@@ -1864,7 +1881,7 @@ not_null<Ui::RpWidget*> AddHistoryRow(
 	minor->setAttribute(Qt::WA_TransparentForMouseEvents);
 	if (content.itemAmount) {
 		SetRowItemAmount(major, minor, content.incoming, content.failed);
-	} else {
+	} else if (content.onchainGift != TransferOnchainGift::Reprice) {
 		SetRowAmount(
 			major,
 			minor,
@@ -1873,13 +1890,14 @@ not_null<Ui::RpWidget*> AddHistoryRow(
 			content.pending,
 			content.failed);
 	}
-	const auto title = inner->add(
-		object_ptr<Ui::FlatLabel>(
-			inner,
-			content.title,
-			st::walletRowTitleLabel),
-		{ 0, 0, HistoryRowTitleSkip(major->width() + minor->width()), 0 });
-	title->setBreakEverywhere(true);
+	const auto title = AddHistoryRowTitle(
+		inner,
+		content.title,
+		content.address,
+		LabelLineHeight(st::walletRowTitleLabel),
+		{ 0, 0, HistoryRowTitleSkip(major->width() + minor->width()), 0 },
+		button,
+		[=](auto paint) { button->addPaintUnderRipple(std::move(paint)); });
 	auto subtitle = (Ui::FlatLabel*)nullptr;
 	if (!content.subtitle.isEmpty()) {
 		Ui::AddSkip(inner, st::walletRowSkip);
@@ -1894,14 +1912,11 @@ not_null<Ui::RpWidget*> AddHistoryRow(
 		inner,
 		content.date,
 		st::walletRowDateLabel));
-	const auto hasChip = content.itemAmount && (media != nullptr);
+	const auto hasChip = (content.itemAmount
+		|| (content.onchainGift != TransferOnchainGift::None))
+		&& (media != nullptr);
 	if (hasChip) {
-		AddHistoryRowChip(
-			inner,
-			button,
-			media,
-			content.collectible,
-			content.collectibleRecord);
+		AddHistoryRowChip(inner, button, media, content);
 	}
 
 	const auto circle = Ui::CreateChild<Ui::RpWidget>(wrap);
@@ -2328,8 +2343,7 @@ void SendingHistoryRow::setContent(HistoryRowContent content) {
 			TrackHistoryRowChip(
 				&_chip,
 				_media,
-				_content.collectible,
-				_content.collectibleRecord,
+				_content,
 				[=] { _surface->update(); },
 				_chipLifetime);
 		}
@@ -2989,15 +3003,21 @@ void SendingHistoryRow::paintTexts(
 		? int(base::SafeRound(layout.textWidth
 			+ (target.textWidth - layout.textWidth) * progress.amount))
 		: layout.textWidth;
-	line(
-		_text.title,
-		_layout.title,
-		settle ? &settle->text.title : nullptr,
-		settle ? settle->layout.title : HistoryRowLine(),
-		settle && (settle->content.title == _content.title),
-		st::walletRowTitleLabel,
-		true,
-		titleWidth);
+	const auto titleHeight = LabelLineHeight(st::walletRowTitleLabel);
+	PaintSendingRowTitle(
+		p,
+		myrtlrect(left, _layout.title.top, titleWidth, titleHeight),
+		_text.address,
+		settle ? &settle->text.address : nullptr,
+		(settle
+			&& (settle->content.title == _content.title)
+			&& (settle->content.address == _content.address)),
+		progress.label,
+		[&](bool next, float64 opacity) {
+			const auto &text = next ? settle->text.title : _text.title;
+			const auto at = next ? settle->layout.title : _layout.title;
+			draw(text, st::walletRowTitleLabel, at, true, titleWidth, opacity);
+		});
 	line(
 		_text.subtitle,
 		_layout.subtitle,
@@ -3201,43 +3221,51 @@ not_null<SendingHistoryRow*> AddSendingHistoryRow(
 	const auto date = item.date
 		? langDateTime(base::unixtime::parse(*item.date))
 		: QString();
-	if (ShowsCollectible(item)) {
-		const auto telegram = ShowsGiftMove(item);
+	if (ShowsCollectible(item) || ShowsOnchainGift(item)) {
+		const auto look = ComputeCollectibleRowLook(item);
+		const auto service = !look.service.isEmpty();
 		const auto peer = item.counterpartyPeer
 			? session->data().peerLoaded(PeerId(item.counterpartyPeer))
 			: nullptr;
-		const auto hasCounterparty = !telegram && !item.counterparty.isEmpty();
+		const auto hasCounterparty = !service && !item.counterparty.isEmpty();
 		const auto domain = hasCounterparty
 			? item.counterpartyName.trimmed()
 			: QString();
-		const auto kindText = CollectibleRowKindText(item);
-		const auto titleIsKind = !telegram && !peer && !hasCounterparty;
+		const auto titleIsKind = !service && !peer && !hasCounterparty;
 		const auto statusText = RowStatusSubtitle(item.status);
+		const auto titleAddress = (!peer && domain.isEmpty() && hasCounterparty)
+			? CounterpartyAddress(item)
+			: QString();
 		return {
-			.title = (telegram
-				? tr::lng_wallet_row_telegram(tr::now)
+			.title = (service
+				? look.service
 				: peer
 				? peer->name()
 				: !domain.isEmpty()
 				? domain
 				: hasCounterparty
-				? ShortAddressForm(CounterpartyAddress(item))
-				: kindText),
+				? ShortAddressForm(titleAddress)
+				: look.kind),
+			.address = titleAddress,
 			.subtitle = (!statusText.isEmpty()
 				? statusText
 				: titleIsKind
 				? QString()
-				: kindText),
+				: look.kind),
 			.date = date,
-			.incoming = item.incoming,
+			.amountNano = look.amountNano,
+			.incoming = look.incoming,
 			.failed = (item.status == TransferItem::Status::Failure),
 			.avatar = (peer
 				? RowAvatar::Peer
-				: item.incoming
+				: look.neutral
+				? RowAvatar::Gear
+				: look.incoming
 				? RowAvatar::In
 				: RowAvatar::Out),
 			.peer = peer,
-			.itemAmount = true,
+			.itemAmount = look.itemAmount,
+			.onchainGift = item.onchainGift,
 			.collectible = item.collectible,
 			.collectibleRecord = item.collectibleRecord,
 		};
@@ -3327,14 +3355,16 @@ not_null<SendingHistoryRow*> AddSendingHistoryRow(
 		: item.incoming
 		? tr::lng_wallet_row_deposit(tr::now)
 		: tr::lng_wallet_row_withdrawal(tr::now);
+	const auto titleAddress = (hasCounterparty && domain.isEmpty())
+		? (transfer ? address : CounterpartyAddress(item))
+		: QString();
 	return {
 		.title = (hasCounterparty
 			? (!domain.isEmpty()
 				? domain
-				: ShortAddressForm(transfer
-					? address
-					: CounterpartyAddress(item)))
+				: ShortAddressForm(titleAddress))
 			: kindText),
+		.address = titleAddress,
 		.subtitle = (!statusText.isEmpty()
 			? statusText
 			: hasCounterparty
@@ -3796,6 +3826,7 @@ namespace {
 		const TransferItem &a,
 		const TransferItem &b) {
 	return (ShowsCollectible(a) == ShowsCollectible(b))
+		&& (a.onchainGift == b.onchainGift)
 		&& (a.collectible == b.collectible)
 		&& (a.collectibleRecord == b.collectibleRecord)
 		&& (a.amountNano == b.amountNano)
@@ -3864,27 +3895,6 @@ void ShowNetworkFeesAbout(
 	}));
 }
 
-[[nodiscard]] TextWithEntities GramMark(
-		Ui::Text::CustomEmojiHelper &helper,
-		const style::font &font) {
-	auto descriptor = Ui::Text::PaletteDependentEmoji{
-		.factory = [=] {
-			return Ui::Earn::IconCurrencyTwoTone(
-				font,
-				st::windowActiveTextFg->c);
-		},
-	};
-	const auto image = descriptor.factory();
-	const auto alignedTop = Ui::Earn::AlignedMarkTop(font, image);
-	const auto emojiY = (font->height - st::emojiSize) / 2;
-	const auto lineShift = Ui::Fixed(font->ascent) - font->fascent;
-	const auto naturalTop = (lineShift + emojiY).toInt()
-		+ Ui::Emoji::GetCustomSkipNormal();
-	const auto marginTop = int(base::SafeRound(alignedTop - naturalTop));
-	descriptor.margin = QMargins(0, marginTop, 0, 0);
-	return helper.paletteDependent(std::move(descriptor));
-}
-
 // A transaction a message named is served after the box is already open, so
 // the fee row exists from the first frame and says what it is waiting for.
 enum class DetailsFee {
@@ -3942,13 +3952,7 @@ void AddFeeTableRow(
 		});
 	} else {
 		value = FiatRateValue(session) | rpl::map([=](const FiatRate &rate) {
-			auto result = diamond;
-			result.append(QChar(' '));
-			result.append(Ui::FormatTonAmount(feeNano).full);
-			result.append(QChar(' '));
-			result.append(Ui::Text::Colorized(
-				FormatFiat(feeNano, rate, kFeeFiatDecimals, true)));
-			return result;
+			return GramValueText(diamond, feeNano, rate, kFeeFiatDecimals);
 		});
 	}
 	const auto label = Ui::CreateChild<Ui::FlatLabel>(
@@ -4032,6 +4036,41 @@ void AddPeerCounterpartyRows(
 
 } // namespace
 
+TextWithEntities GramMark(
+		Ui::Text::CustomEmojiHelper &helper,
+		const style::font &font) {
+	auto descriptor = Ui::Text::PaletteDependentEmoji{
+		.factory = [=] {
+			return Ui::Earn::IconCurrencyTwoTone(
+				font,
+				st::windowActiveTextFg->c);
+		},
+	};
+	const auto image = descriptor.factory();
+	const auto alignedTop = Ui::Earn::AlignedMarkTop(font, image);
+	const auto emojiY = (font->height - st::emojiSize) / 2;
+	const auto lineShift = Ui::Fixed(font->ascent) - font->fascent;
+	const auto naturalTop = (lineShift + emojiY).toInt()
+		+ Ui::Emoji::GetCustomSkipNormal();
+	const auto marginTop = int(base::SafeRound(alignedTop - naturalTop));
+	descriptor.margin = QMargins(0, marginTop, 0, 0);
+	return helper.paletteDependent(std::move(descriptor));
+}
+
+TextWithEntities GramValueText(
+		const TextWithEntities &mark,
+		int64 amountNano,
+		const FiatRate &rate,
+		int fiatDecimals) {
+	auto result = mark;
+	result.append(QChar(' '));
+	result.append(Ui::FormatTonAmount(amountNano).full);
+	result.append(QChar(' '));
+	result.append(Ui::Text::Colorized(
+		FormatFiat(amountNano, rate, fiatDecimals, true)));
+	return result;
+}
+
 not_null<Ui::TableLayout*> AddDetailsTableFrame(
 		not_null<Ui::VerticalLayout*> container) {
 	const auto wrap = container->add(
@@ -4084,6 +4123,8 @@ void AddDetailsTable(
 			tr::lng_wallet_row_key_change(tr::marked));
 	} else if (ShowsGiftMove(item)) {
 		AddGiftMoveDetailsRows(table, item);
+	} else if (ShowsOnchainGift(item)) {
+		AddOnchainGiftDetailsRows(table, box->uiShow(), session, item);
 	} else if (peer) {
 		AddPeerCounterpartyRows(box, table, show, peer, item);
 	} else if (!item.counterparty.isEmpty()) {
@@ -4118,14 +4159,16 @@ void AddDetailsTable(
 	}
 	const auto pending
 		= (item.status == TransferItem::Status::Pending);
-	// An incoming transfer was paid for by whoever sent it, and what the
-	// wallet spends to receive one is a few nanograms, so the row is left
-	// out entirely and nothing is waited for on its behalf.
-	if (!item.incoming) {
+	const auto onchain = ShowsOnchainGift(item);
+	// An incoming transfer was paid for by whoever sent it and costs a few
+	// nanograms to receive, so no fee row is shown or waited for; an on-chain
+	// gift action is the wallet's own, so its fee is shown, even a zero one.
+	if (!item.incoming || onchain) {
 		if (fee != DetailsFee::Known) {
 			AddPendingFeeTableRow(table, fee);
 		} else if (!pending
-			&& (item.gasless || (item.feeNano && *item.feeNano > 0))) {
+			&& (item.gasless
+				|| (item.feeNano && (*item.feeNano > 0 || onchain)))) {
 			AddFeeTableRow(table, box->uiShow(), session, item);
 		}
 	}
@@ -4668,17 +4711,6 @@ void WalletReceiveBox(
 	}, buy->lifetime());
 }
 
-void ShowWalletReceiveBox(
-		not_null<Main::Session*> session,
-		std::shared_ptr<Ui::Show> show) {
-	auto &wallet = session->wallet();
-	const auto address = wallet.addressFriendly(false);
-	if (address.size() != kAddressLength) {
-		return;
-	}
-	show->showBox(Box(WalletReceiveBox, session, address));
-}
-
 [[nodiscard]] Ui::LayerStackWidget *BoxLayerStack(
 		not_null<Ui::GenericBox*> box) {
 	auto stack = (Ui::LayerStackWidget*)nullptr;
@@ -4688,6 +4720,8 @@ void ShowWalletReceiveBox(
 	}
 	return stack;
 }
+
+} // namespace
 
 void CloseByOutsideClick(not_null<Ui::GenericBox*> box) {
 	const auto layer = box->parentWidget();
@@ -4706,6 +4740,8 @@ void CloseByOutsideClick(not_null<Ui::GenericBox*> box) {
 		return base::EventFilterResult::Cancel;
 	});
 }
+
+namespace {
 
 void AddWalletFeaturesBody(
 		not_null<Ui::GenericBox*> box,
@@ -5075,7 +5111,9 @@ void WalletTransactionBox(
 		const auto headerBottomSkip = HasDetailsComment(state->item)
 			? (st::walletDetailsAmountBottomSkip / 2)
 			: st::walletDetailsAmountBottomSkip;
-		if (ShowsCollectible(state->item)) {
+		const auto onchain = ShowsOnchainGift(state->item);
+		const auto collectible = ShowsCollectible(state->item);
+		if (collectible) {
 			if (!state->media) {
 				state->media = std::make_shared<CollectibleMedia>(session);
 			}
@@ -5085,8 +5123,15 @@ void WalletTransactionBox(
 				session,
 				state->media,
 				state->item,
-				headerBottomSkip);
-		} else {
+				onchain ? 0 : headerBottomSkip);
+		}
+		if (onchain) {
+			const auto skip = (state->item.amountNano != 0)
+				? st::walletDetailsOnchainAmountSkip
+				: headerBottomSkip;
+			AddOnchainGiftPill(header, state->item, skip);
+		}
+		if (onchain ? (state->item.amountNano != 0) : !collectible) {
 			AddDetailsAmountHeader(
 				header,
 				state->item,
@@ -6044,7 +6089,12 @@ QString SendErrorText(SendError error, int64 minTransferNano) {
 	case SendError::Rejected:
 	case SendError::DataInvalid:
 	case SendError::CollectibleRejected:
+	case SendError::UnsupportedSendMode:
 		return tr::lng_wallet_send_error_failed(tr::now);
+	case SendError::NoWallet:
+		return tr::lng_wallet_unavailable(tr::now);
+	case SendError::WalletNotReady:
+		return tr::lng_wallet_state_error(tr::now);
 	case SendError::CollectibleUnavailable:
 		return tr::lng_wallet_collectible_not_owned(tr::now);
 	case SendError::KeyChanged:
@@ -6063,6 +6113,17 @@ void ShowWalletKeyChanged(std::shared_ptr<Main::SessionShow> show) {
 
 void ShowWalletHowItWorks(std::shared_ptr<Main::SessionShow> show) {
 	show->showBox(Box(WalletHowItWorksBox, &show->session()));
+}
+
+void ShowWalletReceiveBox(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show) {
+	auto &wallet = session->wallet();
+	const auto address = wallet.addressFriendly(false);
+	if (address.size() != kAddressLength) {
+		return;
+	}
+	show->showBox(Box(WalletReceiveBox, session, address));
 }
 
 QString ErrorWithType(const QString &message, const QString &error) {
@@ -8296,6 +8357,9 @@ void WalletSendBox(
 					case SendError::CollectibleRejected:
 					case SendError::Silent:
 					case SendError::SubmissionUnknown:
+					case SendError::NoWallet:
+					case SendError::WalletNotReady:
+					case SendError::UnsupportedSendMode:
 						fail(result.error);
 						return;
 					}
@@ -8823,7 +8887,12 @@ void WalletSendBox(
 		if (state->heldFee) {
 			if (const auto quote = draft->quote.current()) {
 				const auto shown = *base::take(state->heldFee);
-				if (shown != QuoteConfirmFee(*quote)) {
+				const auto updated = QuoteConfirmFee(*quote);
+				if (shown.gasless != updated.gasless
+					|| shown.pending != updated.pending
+					|| FeeChangeNeedsConfirmation(
+						shown.feeNano,
+						updated.feeNano)) {
 					const auto held = state->sendAuthorization;
 					stopSending();
 					state->heldAuthorization = held;
@@ -8972,7 +9041,7 @@ void WalletSendBox(
 			return;
 		}
 		// WHY: Enter reaches here whatever the button shows, so a press made
-		// while counting waits and goes on only at the fee shown; this press
+		// while counting waits and checks the displayed fee; this press
 		// answers the previous held press's "review the new fee" refusal.
 		if (state->previewError.current() == SendError::QuoteExpired) {
 			state->previewError = SendError::None;

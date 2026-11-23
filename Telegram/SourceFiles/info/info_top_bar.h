@@ -140,8 +140,6 @@ private:
 	void updateSelectionState();
 	void createSelectionControls();
 
-	void performToggleStoryPin();
-
 	void setSearchField(
 		base::unique_qptr<Ui::InputField> field,
 		rpl::producer<bool> &&shown,

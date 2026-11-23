@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_integration.h"
 #include "history/history.h"
 #include "apiwrap.h"
+#include "api/api_stories.h"
 #include "api/api_updates.h"
 #include "calls/calls_instance.h"
 #include "countries/countries_manager.h"
@@ -92,6 +93,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "wallet/wallet_panel.h"
 #include "webrtc/webrtc_environment.h"
 #include "webview/webview_interface.h"
+#include "window/window_columns.h"
 #include "window/window_saved_windows.h"
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
@@ -293,6 +295,7 @@ Application::~Application() {
 
 	Shortcuts::Finish();
 
+	Tgw::Runtime::Finish();
 	Ui::Emoji::Clear();
 	Media::Clip::Finish();
 
@@ -369,10 +372,12 @@ void Application::run() {
 	}, _lifetime);
 
 	style::ShortAnimationPlaying(
-	) | rpl::on_next([=](bool playing) {
+	) | rpl::combine_previous(
+		false
+	) | rpl::on_next([=](bool was, bool playing) {
 		if (playing) {
 			MTP::details::pause();
-		} else {
+		} else if (was) {
 			MTP::details::unpause();
 		}
 	}, _lifetime);
@@ -607,7 +612,7 @@ void Application::processCreatedWindow(
 }
 
 void Application::startMediaView() {
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 	// On macOS we create some windows async, otherwise they're
 	// added to the Dock Menu as a visible window and are removed
 	// only after first show and then hide.
@@ -615,7 +620,7 @@ void Application::startMediaView() {
 		_mediaView = std::make_unique<Media::View::OverlayWidget>();
 		_mediaView->setSystemMediaControls(_mediaControlsManager.get());
 	});
-#elif defined Q_OS_WIN // Q_OS_MAC || Q_OS_WIN
+#elif defined Q_OS_WIN // Q_OS_MACOS || Q_OS_WIN
 	// On Windows we needed such hack for the main window, otherwise
 	// somewhere inside the media viewer creating code its geometry
 	// was broken / lost to some invalid values.
@@ -626,20 +631,20 @@ void Application::startMediaView() {
 #else
 	_mediaView = std::make_unique<Media::View::OverlayWidget>();
 	_mediaView->setSystemMediaControls(_mediaControlsManager.get());
-#endif // Q_OS_MAC || Q_OS_WIN
+#endif // Q_OS_MACOS || Q_OS_WIN
 }
 
 void Application::startTray() {
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 	// On macOS we create some windows async, otherwise they're
 	// added to the Dock Menu as a visible window and are removed
 	// only after first show and then hide, tray icon being "Item-0".
 	InvokeQueued(this, [=] {
 		createTray();
 	});
-#else // Q_OS_MAC
+#else // Q_OS_MACOS
 	createTray();
-#endif // Q_OS_MAC
+#endif // Q_OS_MACOS
 }
 
 void Application::createTray() {
@@ -1200,6 +1205,30 @@ bool Application::uploadPreventsQuit() {
 	return false;
 }
 
+bool Application::storyPostPreventsQuit() {
+	if (!_domain->started()) {
+		return false;
+	}
+	for (const auto &[index, account] : _domain->accounts()) {
+		if (!account->sessionExists()) {
+			continue;
+		}
+		auto &session = account->session();
+		if (session.api().stories().posting()) {
+			session.api().stories().stopPostingWithConfirmation([=] {
+				for (const auto &[index, account] : _domain->accounts()) {
+					if (account->sessionExists()) {
+						account->session().api().stories().cancelPosting();
+					}
+				}
+				Quit();
+			});
+			return true;
+		}
+	}
+	return false;
+}
+
 bool Application::downloadPreventsQuit() {
 	if (_downloadManager->loadingInProgress()) {
 		_downloadManager->loadingStopWithConfirmation([=] { Quit(); });
@@ -1210,6 +1239,7 @@ bool Application::downloadPreventsQuit() {
 
 bool Application::preventsQuit(QuitReason reason) {
 	if (exportPreventsQuit()
+		|| storyPostPreventsQuit()
 		|| uploadPreventsQuit()
 		|| downloadPreventsQuit()) {
 		return true;
@@ -1253,9 +1283,6 @@ void Application::checkStartUrls() {
 		return;
 	}
 	if (!Core::App().passcodeLocked()) {
-		// WHY: tg://resolve?acc= switches the account, which shows the
-		// new main widget and re-enters here while we still iterate,
-		// so take the list out and merge whatever was added meanwhile.
 		const auto urls = base::take(cRefStartUrls());
 		auto left = ranges::views::all(
 			urls
@@ -1389,7 +1416,11 @@ bool Application::openCustomUrl(
 }
 
 void Application::preventOrInvoke(Fn<void()> &&callback) {
-	_lastActivePrimaryWindow->preventOrInvoke(std::move(callback));
+	if (_lastActivePrimaryWindow) {
+		_lastActivePrimaryWindow->preventOrInvoke(std::move(callback));
+	} else {
+		callback();
+	}
 }
 
 void Application::updateWindowTitles() {
@@ -1523,9 +1554,15 @@ void Application::localPasscodeChanged() {
 	checkAutoLock(crl::now());
 }
 
-bool Application::savingPositionFor(
+bool Application::isWindowInSettings(
 		not_null<Window::Controller*> window) const {
-	return !_windowInSettings || (_windowInSettings == window);
+	return (_windowInSettings == window);
+}
+
+void Application::reseedWindowInSettings() {
+	if (_windowInSettings) {
+		_windowInSettings->columns().seedFromSettings();
+	}
 }
 
 bool Application::hasActiveWindow(not_null<Main::Session*> session) const {
@@ -1594,6 +1631,14 @@ not_null<Window::Controller*> Application::ensureSeparateWindowFor(
 	}
 	result->firstShow();
 	result->finishFirstShow();
+	if (result->isPrimary()) {
+		if (!_lastActivePrimaryWindow) {
+			_lastActivePrimaryWindow = result;
+		}
+		if (!_windowInSettings) {
+			setWindowInSettings(result);
+		}
+	}
 	return activate(result);
 }
 
@@ -1727,6 +1772,43 @@ void Application::setLastActiveWindow(Window::Controller *window) {
 	}, _floatPlayerDelegateLifetime);
 }
 
+void Application::setWindowInSettings(Window::Controller *window) {
+	Expects(!window || window->isPrimary());
+
+	if (_windowInSettings == window) {
+		return;
+	}
+	if (window) {
+		window->widget()->savePosition();
+	}
+	_windowInSettings = window;
+	if (window) {
+		window->widget()->savePositionToSettings();
+		window->columns().writeToSettings();
+		saveSettingsDelayed();
+	}
+}
+
+Window::Controller *Application::nextPrimaryWindow(
+		not_null<Window::Controller*> closing) const {
+	const auto eligible = [&](not_null<Window::Controller*> window) {
+		return (window != closing)
+			&& window->isPrimary()
+			&& !_closingAsyncWindows.contains(window);
+	};
+	for (const auto &window : ranges::views::reverse(_windowStack)) {
+		if (eligible(window)) {
+			return window;
+		}
+	}
+	for (const auto &window : ranges::views::values(_windows)) {
+		if (eligible(window.get())) {
+			return window.get();
+		}
+	}
+	return nullptr;
+}
+
 void Application::closeWindow(not_null<Window::Controller*> window) {
 	if (_savedWindows) {
 		_savedWindows->windowClosed(window);
@@ -1748,11 +1830,12 @@ void Application::closeWindow(not_null<Window::Controller*> window) {
 		: nullptr;
 	Assert(next != window);
 
+	const auto nextPrimary = nextPrimaryWindow(window);
 	if (_lastActivePrimaryWindow == window) {
-		_lastActivePrimaryWindow = next;
+		_lastActivePrimaryWindow = nextPrimary;
 	}
 	if (_windowInSettings == window) {
-		_windowInSettings = next;
+		setWindowInSettings(nextPrimary);
 	}
 	if (stackIt != end(_windowStack)) {
 		_windowStack.erase(stackIt);
@@ -1948,7 +2031,7 @@ bool Application::isSharingScreen() const {
 
 // macOS Qt bug workaround, sometimes no leaveEvent() gets to the nested widgets.
 void Application::registerLeaveSubscription(not_null<QWidget*> widget) {
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 	if (const auto window = widget->window()) {
 		auto i = _leaveFilters.find(window);
 		if (i == end(_leaveFilters)) {
@@ -1976,11 +2059,11 @@ void Application::registerLeaveSubscription(not_null<QWidget*> widget) {
 		}
 		i->second.registered.push_back(widget.get());
 	}
-#endif // Q_OS_MAC
+#endif // Q_OS_MACOS
 }
 
 void Application::unregisterLeaveSubscription(not_null<QWidget*> widget) {
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 	if (const auto topLevel = widget->window()) {
 		const auto i = _leaveFilters.find(topLevel);
 		if (i != end(_leaveFilters)) {
@@ -1992,7 +2075,7 @@ void Application::unregisterLeaveSubscription(not_null<QWidget*> widget) {
 			});
 		}
 	}
-#endif // Q_OS_MAC
+#endif // Q_OS_MACOS
 }
 
 void Application::postponeCall(FnMut<void()> &&callable) {

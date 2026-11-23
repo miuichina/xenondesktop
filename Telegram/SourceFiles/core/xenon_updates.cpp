@@ -24,6 +24,8 @@
 
 #ifdef Q_OS_LINUX
 #include "platform/linux/update_install_linux.h"
+#elif defined Q_OS_WIN
+#include "platform/win/update_install_win.h"
 
 #include <ksandbox.h>
 #endif // Q_OS_LINUX
@@ -444,13 +446,13 @@ bool CanForceUpdate() {
 	if (!Supported()) {
 		return false;
 	}
-#ifdef Q_OS_LINUX
+#if defined Q_OS_LINUX || defined Q_OS_WIN
 	auto error = QString();
 	return Platform::GetUpdateInstallMode(cExeDir() + cExeName(), error)
 		== Platform::UpdateInstallMode::Writable;
-#else // Q_OS_LINUX
+#else // Q_OS_LINUX || Q_OS_WIN
 	return true;
-#endif // Q_OS_LINUX
+#endif // Q_OS_LINUX || Q_OS_WIN
 }
 
 bool AutomaticallyCheck() {

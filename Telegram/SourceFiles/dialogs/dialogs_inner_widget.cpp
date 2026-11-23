@@ -92,6 +92,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/multi_select.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/unread_badge.h"
+#include "boxes/contacts_box.h"
 #include "boxes/delete_messages_box.h"
 #include "boxes/filters/edit_filter_box.h"
 #include "boxes/peers/edit_forum_topic_box.h"
@@ -376,6 +377,19 @@ InnerWidget::InnerWidget(
 		dialogRowReplaced(r.old, r.now);
 	}, lifetime());
 
+	session().changes().realtimeHistoryUpdates(
+		Data::HistoryUpdate::Flag::IsPinned
+	) | rpl::on_next([=](const Data::HistoryUpdate &update) {
+		_removedRowSlide.block(update.history);
+		Ui::PostponeCall(this, [=] { _removedRowSlide.clearPending(); });
+	}, lifetime());
+
+	session().changes().realtimeHistoryUpdates(
+		Data::HistoryUpdate::Flag::Folder
+	) | rpl::on_next([=](const Data::HistoryUpdate &update) {
+		_removedRowSlide.start(update.history);
+	}, lifetime());
+
 	session().data().sendActionManager().animationUpdated(
 	) | rpl::on_next([=](
 			const Data::SendActionManager::AnimationUpdate &update) {
@@ -414,16 +428,17 @@ InnerWidget::InnerWidget(
 
 	Ui::ScheduleThanosEffectWarmUp(&session(), lifetime());
 
+	session().settings().archiveCollapsedChanges(
+	) | rpl::on_next([=] {
+		refreshWithArchiveSlide();
+	}, lifetime());
+
 	rpl::merge(
-		session().settings().archiveCollapsedChanges() | rpl::map_to(false),
-		session().data().chatsFilters().changed() | rpl::map_to(true),
-		session().data().chatsFilters().tagsEnabledChanges(
-		) | rpl::map_to(true)
-	) | rpl::on_next([=](bool refreshHeight) {
-		if (refreshHeight) {
-			_chatsFilterTags.clear();
-			_shownList->updateHeights(_narrowRatio);
-		}
+		session().data().chatsFilters().changed(),
+		session().data().chatsFilters().tagsEnabledChanges() | rpl::to_empty
+	) | rpl::on_next([=] {
+		_chatsFilterTags.clear();
+		_shownList->updateHeights(_narrowRatio);
 		refreshWithCollapsedRows();
 	}, lifetime());
 
@@ -492,7 +507,7 @@ InnerWidget::InnerWidget(
 
 	session().settings().archiveInMainMenuChanges(
 	) | rpl::on_next([=] {
-		refresh();
+		refreshWithArchiveSlide();
 	}, lifetime());
 
 	session().changes().historyUpdates(
@@ -729,6 +744,50 @@ int InnerWidget::skipTopHeight() const {
 	return (_skipTopDialog && !_shownList->empty())
 		? _shownList->begin()->get()->height()
 		: 0;
+}
+
+int InnerWidget::archiveBandHeight() const {
+	if (_shownList->empty() || !_shownList->begin()->get()->folder()) {
+		return 0;
+	}
+	return int(_collapsedRows.size()) * st::dialogsImportantBarHeight
+		+ (_skipTopDialog ? 0 : _shownList->begin()->get()->height());
+}
+
+void InnerWidget::refreshWithArchiveSlide() {
+	_archiveSlide.stop();
+	const auto slideAllowed = [&](int band) {
+		return (_state == WidgetState::Default)
+			&& !communityModeShown()
+			&& isVisible()
+			&& (_visibleTop < band);
+	};
+	const auto archive = _shownList->empty()
+		? nullptr
+		: _shownList->begin()->get()->folder();
+	const auto grab = [&](int height) {
+		return GrabArchiveBand(
+			this,
+			height,
+			!_collapsedRows.empty(),
+			*_st,
+			archive ? archive->chatListName() : QString());
+	};
+	const auto from = archiveBandHeight();
+	auto was = slideAllowed(from) ? grab(from) : ArchiveBand();
+	refreshWithCollapsedRows();
+	const auto to = archiveBandHeight();
+	if (from != to && (!was.image.isNull() || slideAllowed(to))) {
+		auto now = (from && to && !was.image.isNull())
+			? grab(to)
+			: ArchiveBand();
+		_archiveSlide.start(
+			from,
+			to,
+			std::move(was),
+			std::move(now),
+			_controller->window().layerShownValue());
+	}
 }
 
 int InnerWidget::collapsedRowsOffset() const {
@@ -1288,9 +1347,15 @@ void InnerWidget::paint(Painter &p, QRect clip, bool backdrop) {
 		if (communityModeShown()) {
 			p.save();
 		}
+		const auto archiveShift = _archiveSlide.shift();
+		const auto archiveBandTransform = p.transform();
+		if (archiveShift) {
+			p.translate(0, archiveShift);
+			dialogsClip.translate(0, -archiveShift);
+		}
 		const auto collapsedSkip = collapsedRowsOffset();
 		p.translate(0, collapsedSkip);
-		paintCollapsedRows(p, r.translated(0, -collapsedSkip));
+		paintCollapsedRows(p, dialogsClip.translated(0, -collapsedSkip));
 
 		if (communityModeShown() && !_shownList->empty()) {
 			p.translate(0, st::searchedBarHeight);
@@ -1338,7 +1403,17 @@ void InnerWidget::paint(Painter &p, QRect clip, bool backdrop) {
 				}
 			};
 
-			auto i = list.findByY(dialogsClip.top() - skip);
+			const auto removedHeight = reorderingPinned
+				? 0
+				: _removedRowSlide.height(_shownList);
+			const auto removedTop = _removedRowSlide.top();
+			auto removedPainted = !removedHeight;
+			const auto paintRemoved = [&] {
+				_removedRowSlide.paint(p, fullWidth);
+				p.translate(0, removedHeight);
+				removedPainted = true;
+			};
+			auto i = list.findByY(dialogsClip.top() - skip - removedHeight);
 			if (_skipTopDialog && i != list.cend() && !(*i)->index()) {
 				++i;
 			}
@@ -1357,6 +1432,8 @@ void InnerWidget::paint(Painter &p, QRect clip, bool backdrop) {
 					auto row = (*i);
 					if (top >= dialogsClip.top() - skip + dialogsClip.height()) {
 						break;
+					} else if (!removedPainted && top >= removedTop) {
+						paintRemoved();
 					}
 
 					// Skip currently dragged chat to paint it above others after.
@@ -1368,6 +1445,12 @@ void InnerWidget::paint(Painter &p, QRect clip, bool backdrop) {
 					top += row->height();
 				}
 
+				if (!removedPainted
+					&& i == list.cend()
+					&& top == removedTop) {
+					paintRemoved();
+				}
+
 				// Paint the dragged chat above all others.
 				if (reorderingRow) {
 					p.translate(0, reorderingRow->top() - top);
@@ -1377,6 +1460,12 @@ void InnerWidget::paint(Painter &p, QRect clip, bool backdrop) {
 			}
 		} else {
 			p.fillRect(dialogsClip, currentBg());
+		}
+		if (archiveShift) {
+			const auto transform = p.transform();
+			p.setTransform(archiveBandTransform);
+			_archiveSlide.paintBand(p);
+			p.setTransform(transform);
 		}
 		if (communityModeShown()) {
 			p.restore();
@@ -1809,7 +1898,7 @@ void InnerWidget::fillRightButton(
 	button.activeBg = generateBg(st.button.textFg);
 }
 
-[[nodiscard]] RightButton *InnerWidget::maybeCacheRightButton(Row *row) {
+RightButton *InnerWidget::maybeCacheRightButton(Row *row) {
 	if (const auto user = MaybeBotWithApp(row)) {
 		const auto it = _rightButtons.find(user->id);
 		if (it == _rightButtons.end()) {
@@ -2714,6 +2803,7 @@ bool InnerWidget::addQuickActionRipple(
 		.sizeOverride = Size(st::dialogsQuickActionSize),
 	});
 	context->action = action;
+	context->label = type;
 	context->icon->jumpTo(context->icon->framesCount() - 1, [=] {
 		const auto size = QSize(
 			st::dialogsQuickActionRippleSize,
@@ -2738,10 +2828,7 @@ bool InnerWidget::addQuickActionRipple(
 							p,
 							Rect(size),
 							context->icon.get(),
-							ResolveQuickDialogLabel(
-								history,
-								action,
-								_filterId));
+							type);
 					}),
 				std::move(updateCallback));
 		}
@@ -3371,9 +3458,36 @@ void InnerWidget::moveSearchIn() {
 	_searchIn->moveToLeft(0, searchInChatOffset());
 }
 
+void InnerWidget::prepareRemovedRowSlide(not_null<Row*> row) {
+	const auto top = dialogsOffset() + row->top();
+	if (_state != WidgetState::Default
+		|| communityModeShown()
+		|| _dragging
+		|| _aboveIndex >= 0
+		|| !isVisible()
+		|| _shownList->getRow(row->key()) != row
+		|| (_skipTopDialog && !row->index())
+		|| top >= _visibleBottom
+		|| top + row->height() <= _visibleTop) {
+		return;
+	}
+	_removedRowSlide.prepare(
+		row->entry(),
+		_shownList,
+		row->top(),
+		Ui::GrabWidgetToImage(
+			this,
+			QRect(0, top, width(), row->height()),
+			st::dialogsBg->c));
+	Ui::PostponeCall(this, [=] { _removedRowSlide.clearPending(); });
+}
+
 void InnerWidget::dialogRowReplaced(
 		Row *oldRow,
 		Row *newRow) {
+	if (oldRow && !newRow) {
+		prepareRemovedRowSlide(oldRow);
+	}
 	if (oldRow) {
 		invalidateCachedRow(RowsCacheKey(oldRow->entry()));
 	}
@@ -5156,9 +5270,9 @@ void InnerWidget::refresh(bool toTop) {
 		}
 	} else if (_state == WidgetState::Filtered) {
 		if (_searchEmpty && !_searchEmpty->isHidden()) {
-			h = searchedOffset() + st::recentPeersEmptyHeightMin;
 			_searchEmpty->setMinimalHeight(st::recentPeersEmptyHeightMin);
-			_searchEmpty->move(0, h - st::recentPeersEmptyHeightMin);
+			_searchEmpty->move(0, searchedOffset());
+			h = searchedOffset() + _searchEmpty->height();
 		} else if (_loadingAnimation) {
 			h = searchedOffset() + _loadingAnimation->height();
 		} else {
@@ -5368,6 +5482,14 @@ void InnerWidget::resizeEmpty() {
 	if (_searchEmpty) {
 		_searchEmpty->resizeToWidth(width());
 		_searchEmpty->move(0, searchedOffset());
+		if (_geometryInited
+			&& _state == WidgetState::Filtered
+			&& !_searchEmpty->isHidden()) {
+			const auto full = searchedOffset() + _searchEmpty->height();
+			if (height() != full) {
+				resize(width(), full);
+			}
+		}
 	}
 	if (_loadingAnimation) {
 		_loadingAnimation->resizeToWidth(width());
@@ -5957,7 +6079,7 @@ QImage *InnerWidget::cacheChatsFilterTag(
 	auto colorIndex = -1;
 	if (filter.id()) {
 		roundedText = filter.title().text;
-		roundedText.text = roundedText.text.toUpper();
+		roundedText.text = Ui::Text::Upper(roundedText.text);
 		if (filter.colorIndex()) {
 			colorIndex = *(filter.colorIndex());
 		}
@@ -6772,6 +6894,7 @@ bool InnerWidget::prepareQuickAction(
 		.sizeOverride = Size(st::dialogsQuickActionSize),
 	});
 	context->action = action;
+	context->label = type;
 	return true;
 }
 

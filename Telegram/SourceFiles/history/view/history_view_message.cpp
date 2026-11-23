@@ -62,6 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_premium.h"
 #include "ui/text/text_options.h"
 #include "ui/painter.h"
+#include "ui/unread_badge.h"
 #include "window/window_session_controller.h"
 #include "apiwrap.h"
 #include "api/api_rich_tasks.h"
@@ -92,6 +93,18 @@ constexpr auto kFullLineAppearFinalDuration = crl::time(120);
 constexpr auto kLineHeightAppearDuration = crl::time(100);
 constexpr auto kLineHeightAppearFinalDuration = crl::time(60);
 constexpr auto kMinWidthAppearDuration = crl::time(160);
+
+[[nodiscard]] DocumentId FromNameVerificationId(PeerData *from) {
+	const auto details = from ? from->botVerifyDetails() : nullptr;
+	return details ? details->iconId : 0;
+}
+
+[[nodiscard]] int FromNameVerificationSkip(
+		DocumentId iconId,
+		int availableWidth = kMaxWidth) {
+	const auto skip = st::emojiSize + st::dialogsChatTypeSkip;
+	return (iconId && availableWidth > skip) ? skip : 0;
+}
 
 [[nodiscard]] int RevealLineRight(const Ui::Text::LineLayoutInfo &line) {
 	return line.left + line.width;
@@ -642,9 +655,13 @@ Message::Message(
 }
 
 Message::~Message() {
-	if (_customBadge || _comments || (_fromNameStatus && _fromNameStatus->custom)) {
+	if (_customBadge
+		|| _comments
+		|| _fromNameVerification
+		|| (_fromNameStatus && _fromNameStatus->custom)) {
 		_customBadge = nullptr;
 		_comments = nullptr;
+		_fromNameVerification = nullptr;
 		_fromNameStatus = nullptr;
 		checkHeavyPart();
 	}
@@ -1605,6 +1622,7 @@ QSize Message::performCountOptimalSize() {
 					? _fromName
 					: item->displayHiddenSenderInfo()->nameText();
 				auto namew = st::msgPadding.left()
+					+ FromNameVerificationSkip(FromNameVerificationId(from))
 					+ name.maxWidth()
 					+ Ui::CustomBadge::Width(from)
 					+ (_fromNameStatus
@@ -2515,6 +2533,39 @@ void Message::paintCommentsButton(
 	}
 }
 
+void Message::paintFromNameVerification(
+		Painter &p,
+		DocumentId iconId,
+		QPoint position,
+		QColor color,
+		crl::time now) const {
+	const auto that = const_cast<Message*>(this);
+	if (!iconId) {
+		if (_fromNameVerification) {
+			_fromNameVerification = nullptr;
+			that->checkHeavyPart();
+		}
+		return;
+	}
+	if (!_fromNameVerification
+		|| _fromNameVerification->entityData()
+			!= Data::SerializeCustomEmojiId(iconId)) {
+		_fromNameVerification = Ui::CreateBotVerifiedEmoji(
+			iconId,
+			history()->owner().customEmojiManager().factory(
+				Data::CustomEmojiSizeTag::Isolated),
+			[=] { that->customEmojiRepaint(); });
+		history()->owner().registerHeavyViewPart(that);
+	}
+	clearCustomEmojiRepaint();
+	const auto top = (st::msgNameFont->height - st::emojiSize) / 2;
+	_fromNameVerification->paint(p, {
+		.textColor = color,
+		.now = now,
+		.position = position + QPoint(0, top),
+	});
+}
+
 void Message::paintFromName(
 		Painter &p,
 		QRect &trect,
@@ -2532,6 +2583,12 @@ void Message::paintFromName(
 
 	const auto stm = context.messageStyle();
 	const auto from = displayFrom();
+	const auto verificationId = FromNameVerificationId(from);
+	const auto verificationSkip = FromNameVerificationSkip(
+		verificationId,
+		availableWidth);
+	availableLeft += verificationSkip;
+	availableWidth -= verificationSkip;
 	const auto info = from ? nullptr : item->displayHiddenSenderInfo();
 	Assert(from || info);
 	const auto nameFg = FromNameFg(
@@ -2634,8 +2691,18 @@ void Message::paintFromName(
 	paintLinkRipple(
 		p,
 		nameLinkHandler,
-		QRect(availableLeft, trect.top(), nameWidth, st::msgNameFont->height),
+		QRect(
+			trect.left(),
+			trect.top(),
+			verificationSkip + nameWidth,
+			st::msgNameFont->height),
 		trect.topLeft());
+	paintFromNameVerification(
+		p,
+		verificationSkip ? verificationId : 0,
+		trect.topLeft(),
+		nameFg,
+		context.now);
 	nameText->draw(p, {
 		.position = { availableLeft, trect.top() },
 		.availableWidth = nameAvailableWidth,
@@ -3213,6 +3280,8 @@ void Message::paintRichText(
 		std::clamp(viewportClip.bottom() + 1, 0, visibleHeight));
 	auto articleContext = Iv::Markdown::MarkdownArticlePaintContext(
 		context).translated(-rect.topLeft());
+	articleContext.suppressInteractiveControls
+		= (Message::context() == HistoryView::Context::MediaEditor);
 	if (context.messageSelection && context.messageSelection->isRichPage()) {
 		articleContext.selectionState.selection
 			= context.messageSelection->richPage.selection;
@@ -3867,6 +3936,7 @@ void Message::createTopicButtonRipple() {
 bool Message::hasHeavyPart() const {
 	return _comments
 		|| _customBadge
+		|| _fromNameVerification
 		|| (_fromNameStatus && _fromNameStatus->custom)
 		|| Element::hasHeavyPart();
 }
@@ -3875,6 +3945,7 @@ void Message::unloadHeavyPart() {
 	Element::unloadHeavyPart();
 	_customBadge = nullptr;
 	_comments = nullptr;
+	_fromNameVerification = nullptr;
 	if (_fromNameStatus) {
 		_fromNameStatus->custom = nullptr;
 		_fromNameStatus->id = EmojiStatusId();
@@ -4280,6 +4351,11 @@ bool Message::getStateFromName(
 		}
 		const auto item = data();
 		const auto from = displayFrom();
+		const auto verificationSkip = FromNameVerificationSkip(
+			FromNameVerificationId(from),
+			availableWidth);
+		availableLeft += verificationSkip;
+		availableWidth -= verificationSkip;
 		const auto nameText = [&]() -> const Ui::Text::String * {
 			if (from) {
 				validateFromNameText(from);
@@ -4344,7 +4420,7 @@ bool Message::getStateFromName(
 				return true;
 			}
 		}
-		if (point.x() >= availableLeft
+		if (point.x() >= trect.left()
 			&& point.x() < availableLeft + availableWidth
 			&& point.x() < availableLeft + nameWidth) {
 			outResult->link = fromLink();
@@ -6253,7 +6329,9 @@ ClickHandlerPtr Message::prepareRightActionLink() const {
 		FastShareClickHandler(Fn<void(ClickContext)> handler)
 			: LambdaClickHandler(std::move(handler)) {}
 		QString tooltip() const override {
-			return tr::lng_fast_share_tooltip(tr::now);
+			return property(kFastShareProperty).value<bool>()
+				? tr::lng_fast_share_tooltip(tr::now)
+				: QString();
 		}
 	};
 
@@ -6453,10 +6531,12 @@ void Message::fromNameUpdated(int width) const {
 	if (!via && !guestChat) {
 		return;
 	}
-	const auto available = width
-		- Ui::CustomBadge::Width(from)
+	const auto nameLineWidth = width
 		- st::msgPadding.left()
-		- st::msgPadding.right()
+		- st::msgPadding.right();
+	const auto available = nameLineWidth
+		- Ui::CustomBadge::Width(from)
+		- FromNameVerificationSkip(FromNameVerificationId(from), nameLineWidth)
 		- (_fromNameStatus
 			? (st::dialogsPremiumIcon.icon.width()
 				+ st::msgServiceFont->spacew)

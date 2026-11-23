@@ -241,8 +241,127 @@ class StagedHook(unittest.TestCase):
     def test_other_files_are_ignored(self):
         code, why = self.stage({
             "t.py": "# a\n# b\n// c\n// d\nqMin(1, 2)\n",
-            "a.style": "// a\n// b\nx: 1px;\n"})
+            "a.style": "// a\n// b\nx: 1px;\n" + "x" * 79 + "\n"})
         self.assertEqual(code, 0, why)
+
+    def test_line_width_counts_tab_stops_and_allows_78_columns(self):
+        line = "\t" + "x" * 69
+        code, why = self.stage({"a.cpp": line + ";\n"})
+        self.assertEqual(code, 0, why)
+        code, why = self.stage({"a.cpp": line + "x;\n"})
+        self.assertEqual(code, 1)
+        self.assertIn("a.cpp:1: 79 columns (limit 78, tab width 8)", why)
+
+    def test_only_staged_changes_count(self):
+        long_line = "x" * 79 + "\n"
+        self.repo.commit({"a.cpp": long_line + "int a;\n"})
+        self.repo.put({"a.cpp": long_line + "int b;\n"})
+        with open(os.path.join(self.repo.path, "a.cpp"), "a") as stream:
+            stream.write(long_line)
+        code, why = self.repo.staged()
+        self.assertEqual(code, 0, why)
+
+    def test_overlong_line_with_quoted_path_and_plus_prefix(self):
+        code, why = self.stage({"répertoire/file name.cpp":
+            "\n++value; " + "x" * 70 + "\n"})
+        self.assertEqual(code, 1)
+        self.assertIn("répertoire/file name.cpp:2: 79 columns", why)
+
+    def test_multiline_call_requires_first_argument_on_next_line(self):
+        code, why = self.stage({"a.cpp":
+            "void draw() {\n\tAppendArc(path,\n\t\tcenter,\n\t\tradius);\n}\n"})
+        self.assertEqual(code, 1)
+        self.assertIn("a.cpp:2: Put each argument of the multiline call", why)
+
+    def test_multiline_call_rejects_later_arguments_on_same_line(self):
+        code, why = self.stage({"a.cpp":
+            "void draw() {\n\tAppendArc(\n\t\tpath,\n\t\tcenter, radius);\n}\n"})
+        self.assertEqual(code, 1)
+        self.assertIn("a.cpp:4: Put each argument of the multiline call", why)
+
+    def test_argument_cannot_share_the_end_of_a_multiline_argument(self):
+        code, why = self.stage({"a.cpp": "void draw() {\n\tAppendArc(\n"
+            "\t\t{\n\t\t\tx,\n\t\t\ty,\n\t\t}, radius);\n}\n"})
+        self.assertEqual(code, 1)
+        self.assertIn("a.cpp:6: Put each argument of the multiline call", why)
+
+    def test_call_layout_understands_nested_cpp_syntax(self):
+        code, why = self.stage({"a.cpp": "void declare(int first,\n"
+            "\tint second);\n"
+            "void draw() {\n"
+            "\tAppendArc(\n"
+            "\t\tpath,\n"
+            "\t\t{ x, y },\n"
+            "\t\tRadius<int, short>(1, 2),\n"
+            "\t\tR\"(0, 90)\",\n"
+            "\t\t/* end */ 90.);\n"
+            "\tvisit([&] {\n"
+            "\t\tdraw();\n"
+            "\t});\n"
+            "}\n"})
+        self.assertEqual(code, 0, why)
+
+    def test_call_layout_checks_full_call_from_staged_hunk(self):
+        original = ("void draw() {\n\tAppendArc(path, { x, y }, radius,\n"
+            "\t\t180., 270.);\n}\n")
+        self.repo.commit({"a.cpp": original})
+        code, why = self.stage({"a.cpp": original + "int width;\n"})
+        self.assertEqual(code, 0, why)
+        code, why = self.stage({"a.cpp": original.replace("270.", "360.")})
+        self.assertEqual(code, 1)
+        self.assertIn("a.cpp:2: Put each argument of the multiline call", why)
+
+    def test_multiline_sum_rejects_packed_terms_on_both_lines(self):
+        code, why = self.stage({"a.cpp": "auto left = outer + width * ratio\n"
+            "\t- anchor * bubbleWidth - padding;\n"})
+        self.assertEqual(code, 1)
+        for line in (1, 2):
+            self.assertIn(f"a.cpp:{line}: Start each continuation term", why)
+
+    def test_multiline_sum_keeps_operator_with_term(self):
+        code, why = self.stage({"a.cpp": "auto width = outer +\n"
+            "\tlimits\n"
+            "\t-\n"
+            "\tpadding;\n"})
+        self.assertEqual(code, 1)
+        for line in (1, 3):
+            self.assertIn(f"a.cpp:{line}: Start each continuation term", why)
+
+    def test_sum_layout_understands_precedence_and_unary_signs(self):
+        code, why = self.stage({"a.cpp": "auto total = a - b + c;\n"
+            "auto width = outer\n"
+            "\t+ ratio * (left + right)\n"
+            "\t- (-padding + border);\n"})
+        self.assertEqual(code, 0, why)
+
+    def test_sum_layout_only_checks_affected_expressions(self):
+        original = "auto width = outer + left\n\t- right;\n"
+        self.repo.commit({"a.cpp": original})
+        code, why = self.stage({"a.cpp": original + "auto height = top;\n"})
+        self.assertEqual(code, 0, why)
+        code, why = self.stage({"a.cpp": original.replace("right", "padding")})
+        self.assertEqual(code, 1)
+        self.assertIn("a.cpp:1: Start each continuation term", why)
+
+    def test_commit_is_rejected_by_installed_hook(self):
+        hook = os.path.join(self.repo.path, "hooks", "pre-commit")
+        with open(hook, "w", encoding="utf-8") as stream:
+            stream.write(f'#!/bin/sh\nexec "{sys.executable}" "{HOOK}"'
+                ' --staged\n')
+        os.chmod(hook, 0o755)
+        self.repo.put({"a.cpp": "x" * 79 + "\n"})
+        with self.assertRaises(subprocess.CalledProcessError) as failure:
+            self.repo.git("commit", "-m", "Overlong line")
+        self.assertIn("a.cpp:1: 79 columns", failure.exception.stderr)
+        self.repo.put({"a.cpp": "void draw() {\n"
+            "\tAppendArc(path, { x, y }, radius,\n\t\t180., 270.);\n}\n"})
+        with self.assertRaises(subprocess.CalledProcessError) as failure:
+            self.repo.git("commit", "-m", "Packed call")
+        self.assertIn("a.cpp:2: Put each argument of the multiline call",
+            failure.exception.stderr)
+        self.repo.put({"a.cpp": "void draw() {\n\tAppendArc(\n"
+            "\t\tpath,\n\t\t{ x, y },\n\t\tradius,\n\t\t180.,\n\t\t270.);\n}\n"})
+        self.repo.git("commit", "-m", "Expanded call")
 
     def test_license_header_of_new_file_is_free(self):
         code, why = self.stage({"b.cpp": LICENSE + "int b() {\n"

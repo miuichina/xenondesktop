@@ -22,6 +22,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_reply.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_cursor_state.h"
+#include "history/view/history_view_selection_modifier.h"
+#include "history/view/history_view_touch_speed.h"
 #include "chat_helpers/message_field.h"
 #include "boxes/sticker_set_box.h"
 #include "boxes/translate_box.h"
@@ -2184,10 +2186,10 @@ void InnerWidget::keyPressEvent(QKeyEvent *e) {
 		_cancelSignal.fire({});
 	} else if (e == QKeySequence::Copy && canCopySelected()) {
 		copySelectedText();
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 	} else if (e->key() == Qt::Key_E && e->modifiers().testFlag(Qt::ControlModifier)) {
 		TextUtilities::SetClipboardText(getSelectedText(), QClipboard::FindBuffer);
-#endif // Q_OS_MAC
+#endif // Q_OS_MACOS
 	} else {
 		e->ignore();
 	}
@@ -3030,7 +3032,7 @@ void InnerWidget::mouseActionStart(const QPoint &screenPos, Qt::MouseButton butt
 					_selectedTextSelection = _mouseActionItem->selectionFromStates(
 						_mouseTextAnchor,
 						dragState,
-						_mouseSelectType);
+						HistoryView::MouseTextSelectType(_mouseSelectType));
 					_mouseAction = MouseAction::Selecting;
 					repaintItem(_mouseActionItem);
 				}
@@ -3187,7 +3189,7 @@ void InnerWidget::updateSelected() {
 	}
 
 	TextState dragState;
-	ClickHandlerHost *lnkhost = nullptr;
+	auto lnkhost = (ClickHandlerHost*)nullptr;
 	auto dragStateUserpic = false;
 	auto selectingText = _selectedItem
 		&& (view == _mouseActionItem)
@@ -3261,7 +3263,7 @@ void InnerWidget::updateSelected() {
 				_selectedTextSelection = _mouseActionItem->selectionFromStates(
 					_mouseTextAnchor,
 					dragState,
-					_mouseSelectType);
+					HistoryView::MouseTextSelectType(_mouseSelectType));
 				repaintItem(_mouseActionItem);
 				if (!_wasSelectedText && !_selectedTextSelection.empty()) {
 					_wasSelectedText = true;
@@ -3480,57 +3482,13 @@ void InnerWidget::onTouchScrollTimer() {
 }
 
 void InnerWidget::touchUpdateSpeed() {
-	const auto nowTime = crl::now();
-	if (_touchPrevPosValid) {
-		const int elapsed = nowTime - _touchSpeedTime;
-		if (elapsed) {
-			const QPoint newPixelDiff = (_touchPos - _touchPrevPos);
-			const QPoint pixelsPerSecond = newPixelDiff * (1000 / elapsed);
-
-			const int newSpeedY = (std::abs(pixelsPerSecond.y())
-					> Ui::kFingerAccuracyThreshold)
-				? pixelsPerSecond.y()
-				: 0;
-			const int newSpeedX = (std::abs(pixelsPerSecond.x())
-					> Ui::kFingerAccuracyThreshold)
-				? pixelsPerSecond.x()
-				: 0;
-			if (_touchScrollState == Ui::TouchScrollState::Auto) {
-				const int oldSpeedY = _touchSpeed.y();
-				const int oldSpeedX = _touchSpeed.x();
-				if ((oldSpeedY <= 0 && newSpeedY <= 0) || ((oldSpeedY >= 0 && newSpeedY >= 0)
-					&& (oldSpeedX <= 0 && newSpeedX <= 0)) || (oldSpeedX >= 0 && newSpeedX >= 0)) {
-					_touchSpeed.setY(std::clamp(
-						(oldSpeedY + (newSpeedY / 4)),
-						-Ui::kMaxScrollAccelerated,
-						+Ui::kMaxScrollAccelerated));
-					_touchSpeed.setX(std::clamp(
-						(oldSpeedX + (newSpeedX / 4)),
-						-Ui::kMaxScrollAccelerated,
-						+Ui::kMaxScrollAccelerated));
-				} else {
-					_touchSpeed = QPoint();
-				}
-			} else {
-				if (!_touchSpeed.isNull()) {
-					_touchSpeed.setX(std::clamp(
-						(_touchSpeed.x() / 4) + (newSpeedX * 3 / 4),
-						-Ui::kMaxScrollFlick,
-						+Ui::kMaxScrollFlick));
-					_touchSpeed.setY(std::clamp(
-						(_touchSpeed.y() / 4) + (newSpeedY * 3 / 4),
-						-Ui::kMaxScrollFlick,
-						+Ui::kMaxScrollFlick));
-				} else {
-					_touchSpeed = QPoint(newSpeedX, newSpeedY);
-				}
-			}
-		}
-	} else {
-		_touchPrevPosValid = true;
-	}
-	_touchSpeedTime = nowTime;
-	_touchPrevPos = _touchPos;
+	HistoryView::UpdateTouchSpeed(
+		_touchSpeed,
+		_touchSpeedTime,
+		_touchPrevPos,
+		_touchPrevPosValid,
+		_touchPos,
+		_touchScrollState);
 }
 
 void InnerWidget::touchResetSpeed() {

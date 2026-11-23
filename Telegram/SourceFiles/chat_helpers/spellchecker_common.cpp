@@ -59,7 +59,20 @@ inline auto LWC(QLocale::Language language, QLocale::Country country) {
 	return (language * 1000) + country;
 }
 
+// Unlike the manifest, keeps the country of any language
+[[nodiscard]] int SystemDictionaryId(const QString &name) {
+	const auto locale = QLocale(name);
+	const auto language = locale.language();
+	return (locale.territory() == QLocale(language).territory())
+		? int(language)
+		: LWC(language, locale.territory());
+}
+
 inline auto LanguageFromLocale(QLocale loc) {
+	if (const auto exact = SystemDictionaryId(loc.name())
+		; IsSystemDictionary(exact)) {
+		return exact;
+	}
 	const auto locLang = loc.language();
 	return (ranges::contains(kLangsForLWC, locLang)
 		&& (loc.country() != QLocale::AnyCountry))
@@ -67,9 +80,22 @@ inline auto LanguageFromLocale(QLocale loc) {
 			: int(locLang);
 }
 
+[[nodiscard]] QString SystemDictionaryName(const QLocale &locale) {
+	auto result = locale.nativeLanguageName();
+	if (result.isEmpty()) {
+		result = QLocale::languageToString(locale.language());
+	}
+	result[0] = result[0].toUpper();
+	return (locale.territory() == QLocale(locale.language()).territory())
+		? result
+		: u"%1 (%2)"_q.arg(
+			result,
+			QLocale::territoryToString(locale.territory()));
+}
+
 constexpr auto kDictionariesManifestChannel = "tdhbcfiles"_cs;
 constexpr auto kDictionariesManifestPostId = 2949;
-constexpr auto kDictionariesRev = 1;
+constexpr auto kDictionariesRev = 2;
 
 // Runtime-loaded dictionaries manifest. Kept in memory only: fetched from
 // the pinned JSON post the first time something actually needs it
@@ -276,7 +302,8 @@ void DownloadDictionaryInBackground(
 		not_null<Main::Session*> session,
 		int counter,
 		std::vector<int> langs,
-		Fn<void()> done = nullptr) {
+		Fn<void()> done = nullptr,
+		bool force = false) {
 	if (counter >= langs.size()) {
 		if (done) {
 			done();
@@ -301,9 +328,10 @@ void DownloadDictionaryInBackground(
 			}
 		}
 
-		DownloadDictionaryInBackground(session, counter, langs, done);
+		DownloadDictionaryInBackground(session, counter, langs, done, force);
 	};
-	if (DictionaryExists(id)) {
+	if (DictionaryExists(id)
+		&& !(force && IsSupportedLang(id) && !IsSystemDictionary(id))) {
 		destroyer();
 		return;
 	}
@@ -437,6 +465,7 @@ void ForceRefreshDictionaries(
 		if (DictionariesList.empty()) {
 			return;
 		}
+		Platform::Spellchecker::UpdateLanguages({});
 		DownloadDictionaryInBackground(session, 0, enabled, [=] {
 			Platform::Spellchecker::UpdateLanguages(
 				Core::App().settings().dictionariesEnabled());
@@ -445,6 +474,7 @@ void ForceRefreshDictionaries(
 			// so they don't hold the one-time revision back.
 			const auto complete = ranges::all_of(list, [](int id) {
 				return !IsSupportedLang(id)
+					|| IsSystemDictionary(id)
 					|| ranges::all_of(kDictExtensions, [&](const auto ext) {
 						const auto name = Spellchecker::LocaleFromLangId(id)
 							.name();
@@ -457,7 +487,7 @@ void ForceRefreshDictionaries(
 				WriteDictionariesRev();
 			}
 			then();
-		});
+		}, true);
 	}));
 }
 
@@ -533,6 +563,17 @@ rpl::producer<> DictionariesChanged() {
 	return DictionariesListChanged.events();
 }
 
+std::vector<Dict> DictionariesFromSystem() {
+	auto result = std::vector<Dict>();
+	for (const auto &name : SystemDictionaries()) {
+		auto dict = Dict();
+		dict.id = SystemDictionaryId(name);
+		dict.name = SystemDictionaryName(QLocale(name));
+		result.push_back(std::move(dict));
+	}
+	return result;
+}
+
 void RefreshDictionariesManifest(not_null<Main::Session*> session) {
 	StartManifestRefresh(session);
 }
@@ -586,7 +627,7 @@ bool UnpackDictionary(const QString &path, int langId) {
 	return true;
 }
 
-bool DictionaryExists(int langId) {
+bool DictionaryDownloaded(int langId) {
 	if (!langId) {
 		return true;
 	}
@@ -595,6 +636,17 @@ bool DictionaryExists(int langId) {
 		const auto name = Spellchecker::LocaleFromLangId(langId).name();
 		return !QFile(folder + name + '.' + ext).exists();
 	});
+}
+
+bool IsSystemDictionary(int langId) {
+	return ranges::contains(
+		SystemDictionaries(),
+		langId,
+		SystemDictionaryId);
+}
+
+bool DictionaryExists(int langId) {
+	return DictionaryDownloaded(langId) || IsSystemDictionary(langId);
 }
 
 bool RemoveDictionary(int langId) {
@@ -609,7 +661,7 @@ bool RemoveDictionary(int langId) {
 		return false;
 	}
 	RemoveDictionaryFiles(folder);
-	return !DictionaryExists(langId);
+	return !DictionaryDownloaded(langId);
 }
 
 rpl::producer<QString> ButtonManageDictsState(
@@ -641,6 +693,7 @@ rpl::producer<QString> ButtonManageDictsState(
 		rpl::merge(
 			Spellchecker::SupportedScriptsChanged(),
 			Spellchecker::DictionariesChanged(),
+			Spellchecker::SystemDictionariesChanged(),
 			Core::App().settings().dictionariesEnabledChanges(
 			) | rpl::to_empty,
 			Core::App().settings().spellcheckerEnabledChanges(
@@ -654,7 +707,8 @@ std::vector<int> DefaultLanguages() {
 
 	const auto append = [&](const auto loc) {
 		const auto l = LanguageFromLocale(loc);
-		if (!ranges::contains(langs, l) && IsSupportedLang(l)) {
+		if (!ranges::contains(langs, l)
+			&& (IsSupportedLang(l) || IsSystemDictionary(l))) {
 			langs.push_back(l);
 		}
 	};

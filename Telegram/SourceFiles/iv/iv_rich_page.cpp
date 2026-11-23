@@ -1782,6 +1782,7 @@ void AppendBlock(
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockBlockquoteBlocks &data) {
 		auto parsed = MakeBlock(BlockKind::Quote);
+		parsed.collapsed = data.is_collapsed();
 		{
 			const auto children = RichQuoteScope::BlockChildren(quote, index);
 			AppendBlocks(data.vblocks().v, &parsed.blocks, context);
@@ -2508,9 +2509,7 @@ template <typename Accumulator>
 			if (!CollectSimpleQuote(block, body)) {
 				return false;
 			}
-			to.appendQuote(
-				std::move(body),
-				block.collapsed && RichBlockquoteIsCollapsible(block));
+			to.appendQuote(std::move(body), block.collapsed);
 			break;
 		}
 		default:
@@ -3198,7 +3197,7 @@ TextWithEntities FlattenRichPageSummary(
 		bool emptyFallback) {
 	auto result = tr::marked();
 	auto contributionCount = 0;
-	const Block *soleTable = nullptr;
+	auto soleTable = (const Block*)nullptr;
 	for (const auto &block : page.blocks) {
 		const auto previousSize = result.text.size();
 		AppendSummaryBlock(&result, block, true);

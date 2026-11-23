@@ -262,7 +262,7 @@ void MainWindow::applyInitialWorkMode() {
 	workmodeUpdated(workMode);
 
 	if (controller().isPrimary()) {
-		if (Core::App().settings().windowPosition().maximized) {
+		if (positionMaximized()) {
 			DEBUG_LOG(("Window Pos: First show, setting maximized."));
 			setWindowState(Qt::WindowMaximized);
 		}
@@ -572,6 +572,7 @@ void MainWindow::ensureLayerCreated() {
 			destroyLayer();
 		}
 	});
+	_layerShown = true;
 
 	_layer->boxShownValue(
 	) | rpl::on_next([=](bool shown) {
@@ -601,6 +602,7 @@ void MainWindow::destroyLayer() {
 
 	auto layer = base::take(_layer);
 	_boxShown = false;
+	_layerShown = false;
 	const auto resetFocus = Ui::InFocusChain(layer);
 	if (resetFocus) {
 		setFocus();
@@ -666,6 +668,10 @@ void MainWindow::showOrHideBoxOrLayer(
 
 bool MainWindow::ui_isLayerShown() const {
 	return _layer != nullptr;
+}
+
+rpl::producer<bool> MainWindow::ui_layerShownValue() const {
+	return _layerShown.value();
 }
 
 rpl::producer<bool> MainWindow::ui_boxShownValue() const {
@@ -857,7 +863,7 @@ bool MainWindow::eventFilter(QObject *object, QEvent *e) {
 	case QEvent::Move:
 	case QEvent::Resize: {
 		if (object == this) {
-			positionUpdated();
+			positionUpdated(e->spontaneous());
 		}
 	} break;
 	}

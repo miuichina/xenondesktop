@@ -66,7 +66,10 @@ void ShowVideoEditorLayer(
 		parent,
 		std::move(descriptor));
 	const auto raw = editor.get();
-	auto layer = std::make_unique<LayerWidget>(parent, std::move(editor));
+	auto layer = std::make_unique<LayerWidget>(
+		parent,
+		std::move(editor),
+		[=] { raw->startPlayback(); });
 	InitVideoEditorLayer(layer.get(), raw, std::move(done));
 	controller->showLayer(std::move(layer), Ui::LayerOption::KeepOther);
 }
@@ -239,7 +242,8 @@ void OpenWithPreparedVideoFile(
 		int index,
 		int previewWidth,
 		Fn<void(bool ok)> &&doneCallback,
-		int sideLimit) {
+		int sideLimit,
+		bool allowGif) {
 	using VideoInfo = Ui::PreparedFileInformation::Video;
 	if (index < 0 || index >= int(list->files.size())) {
 		doneCallback(false);
@@ -299,7 +303,7 @@ void OpenWithPreparedVideoFile(
 			return;
 		}
 		const auto kept = video->thumbnail;
-		crl::async([=, done = crl::guard(parent, [=](
+		const auto done = crl::guard(parent, [=](
 				QImage &&frame,
 				Storage::VideoDetails &&details) {
 			const auto video = lookup();
@@ -313,9 +317,10 @@ void OpenWithPreparedVideoFile(
 			}
 			Storage::ApplyVideoDetails(*file, std::move(details));
 			doneCallback(true);
-		})] {
+		});
+		crl::async([=, temporary = file->temporaryPath] {
 			auto frame = Media::Video::ExtractFrame(
-				path,
+				temporary ? *temporary : path,
 				content,
 				mods.cover,
 				dimensions);
@@ -339,16 +344,21 @@ void OpenWithPreparedVideoFile(
 		VideoEditorDescriptor{
 			.path = path,
 			.content = content,
+			.preview = video->thumbnail,
 			.dimensions = dimensions,
 			.duration = video->duration,
 			.data = VideoEditorData{
 				.allowQuality = true,
+				.allowGif = allowGif,
 				.transcodeAlways = transcodeAlways,
 			},
 			.initial = video->modifications,
 		});
 	const auto raw = editor.get();
-	auto layer = std::make_unique<LayerWidget>(parent, std::move(editor));
+	auto layer = std::make_unique<LayerWidget>(
+		parent,
+		std::move(editor),
+		[=] { raw->startPlayback(); });
 	InitVideoEditorLayer(layer.get(), raw, std::move(callback));
 	QObject::connect(layer.get(), &QObject::destroyed, [=] {
 		if (!*accepted) {

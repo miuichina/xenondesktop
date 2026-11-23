@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/notifications_manager.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
 #include "history/view/history_view_element.h"
 #include "iv/iv_rich_page.h"
@@ -525,6 +526,7 @@ void Histories::applyPeerDialogs(const MTPmessages_PeerDialogs &dialogs) {
 	const auto &data = dialogs.c_messages_peerDialogs();
 	_owner->processUsers(data.vusers());
 	_owner->processChats(data.vchats());
+	ApplyResponseTopics(_owner, data.vtopics(), data.vmessages().v);
 	_owner->processMessages(data.vmessages(), NewMessageType::Last);
 	for (const auto &dialog : data.vdialogs().v) {
 		dialog.match([&](const MTPDdialog &data) {
@@ -1192,6 +1194,22 @@ int Histories::sendPreparedMessage(
 		discardCreatingTopic(history, realReplyTo.topicRootId);
 		return 0;
 	}
+	const auto targetId = realReplyTo.messageId;
+	if (IsClientMsgId(targetId.msg) && targetId.peer == history->peer->id) {
+		const auto target = _owner->message(targetId);
+		if (target && target->isSending()) {
+			const auto id = ++_requestAutoincrement;
+			_delayedByReplyTarget[targetId].push_back({
+				.randomId = randomId,
+				.replyTo = std::move(replyTo),
+				.message = std::move(message),
+				.done = std::move(done),
+				.fail = std::move(fail),
+				.requestId = id,
+			});
+			return id;
+		}
+	}
 	return v::match(message(history, realReplyTo), [&](const auto &request) {
 		const auto type = RequestType::Send;
 		return sendRequest(history, type, [=](Fn<void()> finish) {
@@ -1254,6 +1272,42 @@ void Histories::checkTopicCreated(FullMsgId rootId, MsgId realRoot) {
 					true);
 			}
 		}
+	}
+}
+
+void Histories::checkReplyTargetSent(FullMsgId localId, MsgId realId) {
+	const auto i = _delayedByReplyTarget.find(localId);
+	if (i == end(_delayedByReplyTarget)) {
+		return;
+	}
+	auto delayed = base::take(i->second);
+	_delayedByReplyTarget.erase(i);
+
+	const auto history = _owner->history(localId.peer);
+	for (auto &entry : delayed) {
+		const auto itemId = _owner->messageIdByRandomId(entry.randomId);
+		const auto item = itemId ? _owner->message(itemId) : nullptr;
+		if (!realId || (itemId && !item)) {
+			_owner->unregisterMessageRandomId(entry.randomId);
+			if (item) {
+				item->destroy();
+			}
+			continue;
+		} else if (item) {
+			const auto reply = item->Get<HistoryMessageReply>();
+			item->setReplyFields(
+				realId,
+				item->topicRootId(),
+				reply && reply->topicPost());
+		}
+		entry.replyTo.messageId.msg = realId;
+		sendPreparedMessage(
+			history,
+			std::move(entry.replyTo),
+			entry.randomId,
+			std::move(entry.message),
+			std::move(entry.done),
+			std::move(entry.fail));
 	}
 }
 

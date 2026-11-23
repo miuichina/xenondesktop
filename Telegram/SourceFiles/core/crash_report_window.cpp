@@ -34,7 +34,7 @@ constexpr auto kDefaultProxyPort = 80;
 
 } // namespace
 
-PreLaunchWindow *PreLaunchWindowInstance = nullptr;
+auto PreLaunchWindowInstance = (PreLaunchWindow*)nullptr;
 
 PreLaunchWindow::PreLaunchWindow(QString title) {
 	setWindowIcon(Window::CreateIcon());
@@ -327,7 +327,7 @@ LastCrashedWindow::LastCrashedWindow(
 	if (_sendingState != SendingNoReport) {
 		qint64 dumpsize = 0;
 		QString dumpspath = cWorkingDir() + u"tdata/dumps"_q;
-#if defined Q_OS_MAC && !defined MAC_USE_BREAKPAD
+#if defined Q_OS_MACOS && !defined MAC_USE_BREAKPAD
 		dumpspath += u"/completed"_q;
 #endif
 		QString possibleDump = getReportField(qstr("minidump"), qstr("Minidump:"));
