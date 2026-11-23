@@ -272,7 +272,7 @@ QImage CommunityAddChatNarrowButton::prepareRippleMask() const {
 
 const char kOptionForumHideChatsList[] = "forum-hide-chats-list";
 
-class Widget::BottomButton : public Ui::RippleButton {
+class BottomButton : public Ui::RippleButton {
 public:
 	BottomButton(
 		QWidget *parent,
@@ -306,7 +306,7 @@ private:
 
 };
 
-Widget::BottomButton::BottomButton(
+BottomButton::BottomButton(
 	QWidget *parent,
 	const QString &text,
 	const style::FlatButton &st,
@@ -330,12 +330,12 @@ Widget::BottomButton::BottomButton(
 	}
 }
 
-void Widget::BottomButton::setText(const QString &text) {
+void BottomButton::setText(const QString &text) {
 	_text = text;
 	update();
 }
 
-void Widget::BottomButton::setProgress(float64 progress) {
+void BottomButton::setProgress(float64 progress) {
 	if (_progress == progress) {
 		return;
 	}
@@ -353,13 +353,13 @@ void Widget::BottomButton::setProgress(float64 progress) {
 	update();
 }
 
-void Widget::BottomButton::radialAnimationCallback() {
+void BottomButton::radialAnimationCallback() {
 	if (width() < st::columnMinimalWidthLeft) {
 		update();
 	}
 }
 
-void Widget::BottomButton::onStateChanged(
+void BottomButton::onStateChanged(
 		State was,
 		StateChangeSource source) {
 	RippleButton::onStateChanged(was, source);
@@ -376,7 +376,7 @@ void Widget::BottomButton::onStateChanged(
 	update();
 }
 
-void Widget::BottomButton::paintEvent(QPaintEvent *e) {
+void BottomButton::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 
 	const auto over = isOver() && !isDisabled();

@@ -41,7 +41,7 @@ jobs:
       - name: Prepare Docker image
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-jinja2
+          sudo apt-get install -y gnupg python3-jinja2 zstd
           cd Telegram/build/docker/centos_env
           DEBUG= LTO= JOBS=4 python3 gen_dockerfile.py > Dockerfile.generated
           sed -i 's/^dnf -y install cmake /dnf -y --refresh --nobest install cmake /' Dockerfile.generated
@@ -63,6 +63,22 @@ jobs:
         run: |
           docker run --rm --entrypoint /usr/bin/python3.11 xenon-linux-build \
             -c 'import pyexpat; import xml.etree.ElementTree as ET; ET.fromstring("<release/>"); print("Python XML parser OK:", pyexpat.EXPAT_VERSION)'
+
+      - name: Identify Linux build environment
+        id: build_environment
+        run: |
+          image=$(docker image inspect --format '{{json .RootFS.Layers}} {{json .Config.Env}}' xenon-linux-build)
+          digest=$(printf '%s' "$image" | sha256sum | cut -d ' ' -f 1)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Restore intermediate build archive
+        id: build_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/linux-build.tar.zst.gpg
+          key: linux-objects-v1-${{ runner.arch }}-${{ steps.build_environment.outputs.digest }}-${{ hashFiles('.github/workflows/linux.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            linux-objects-v1-${{ runner.arch }}-${{ steps.build_environment.outputs.digest }}-${{ hashFiles('.github/workflows/linux.yml') }}-
 
       - name: Restore compiler cache
         id: compiler_cache
@@ -90,6 +106,26 @@ jobs:
         run: |
           grep -Fx '        -Werror' cmake/options_linux.cmake
           sed -i '/^        -Werror$/d' cmake/options_linux.cmake
+
+      - name: Restore intermediate build and source timestamps
+        if: steps.build_cache.outputs.cache-matched-key != ''
+        shell: bash
+        env:
+          CACHE_PASSWORD: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          restore=$(mktemp -d "$PWD/.ci-build-cache.XXXXXX")
+          trap 'rm -rf -- "$restore"' EXIT
+          if [ ! -e out ] && \
+              gpg --batch --no-symkey-cache --pinentry-mode loopback --passphrase-fd 3 \
+                --decrypt "$RUNNER_TEMP/linux-build.tar.zst.gpg" 3<<<"$CACHE_PASSWORD" | \
+              tar --zstd -xf - -C "$restore" && \
+              test -f "$restore/out/.ci-source-mtimes.json" && \
+              python3 .github/scripts/macos_cache_mtimes.py restore "$restore/out/.ci-source-mtimes.json" && \
+              mv -T "$restore/out" out; then
+            echo 'Restored the Linux Ninja build.'
+          else
+            echo 'Intermediate build cache unavailable. Continuing with ccache.'
+          fi
 
       - name: Build Release
         id: build
@@ -122,6 +158,33 @@ jobs:
           cp out/Release/Updater artifact/Xenon/Updater
           python3 -c 'import shutil; shutil.make_archive("artifact/Xenon-Linux-x64", "zip", "artifact", "Xenon")'
           df -h
+
+      - name: Archive intermediate build
+        id: archive_build
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          CACHE_PASSWORD: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          if [ ! -s out/.ninja_log ] || [ ! -f out/build-Release.ninja ]; then
+            echo 'No reusable Linux Ninja build to archive.'
+            exit 0
+          fi
+          python3 .github/scripts/macos_cache_mtimes.py save out/.ci-source-mtimes.json --source-only
+          tar --format=pax -I 'zstd -T2 -3' -cf - out | \
+            gpg --batch --no-symkey-cache --pinentry-mode loopback --passphrase-fd 3 \
+              --cipher-algo AES256 --compress-algo none --symmetric \
+              --output "$RUNNER_TEMP/linux-build-new.tar.zst.gpg" 3<<<"$CACHE_PASSWORD"
+          mv -f -- "$RUNNER_TEMP/linux-build-new.tar.zst.gpg" "$RUNNER_TEMP/linux-build.tar.zst.gpg"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Save intermediate build archive
+        if: ${{ !cancelled() && steps.archive_build.outputs.ready == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/linux-build.tar.zst.gpg
+          key: ${{ steps.build_cache.outputs.cache-primary-key }}
 
       - name: Show compiler cache statistics
         if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Keep source mtimes consistent with cached Clang precompiled headers."""
+"""Preserve the mtimes of unchanged inputs when restoring a Ninja build."""
 
+import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 
 
 def git(*args):
@@ -41,28 +41,28 @@ def restore(manifest):
         return
 
     data = json.loads(manifest.read_text(encoding="utf-8"))
-    previous_sha = data["commit"]
-    if subprocess.run(["git", "cat-file", "-e", f"{previous_sha}^{{commit}}"],
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
-        subprocess.run(["git", "fetch", "--no-tags", "--depth=1", "origin", previous_sha], check=True)
-
-    changed = [os.fsdecode(name) for name in git("diff", "--no-ext-diff", "--name-only", "-z", previous_sha, "HEAD").split(b"\0") if name]
+    hashes = data.get("hashes")
+    changed = []
+    if hashes is None:
+        previous_sha = data["commit"]
+        if subprocess.run(["git", "cat-file", "-e", f"{previous_sha}^{{commit}}"],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
+            subprocess.run(["git", "fetch", "--no-tags", "--depth=1", "origin", previous_sha], check=True)
+        changed = [os.fsdecode(name) for name in git("diff", "--no-ext-diff", "--name-only", "-z", previous_sha, "HEAD").split(b"\0") if name]
     restored = 0
     dependencies = [Path(name) for name in data.get("dependencies", [])]
     libraries = Path("../Libraries").resolve()
     dependencies = [path for path in dependencies if path.resolve().is_relative_to(libraries)]
     for path in tracked_files() + dependencies:
         name = os.fspath(path)
-        digest = data.get("hashes", {}).get(name)
-        if digest is not None:
-            if not path.is_file() or path.is_symlink():
-                continue
+        mtime = data["files"].get(name)
+        if mtime is None or not path.is_file() or path.is_symlink():
+            continue
+        if hashes is not None:
+            digest = hashes.get(name)
             if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
                 continue
         elif any(name == item or name.startswith(item + "/") for item in changed):
-            continue
-        mtime = data["files"].get(name)
-        if mtime is None or not path.is_file() or path.is_symlink():
             continue
         stat = path.stat()
         os.utime(path, ns=(stat.st_atime_ns, mtime))
@@ -70,10 +70,10 @@ def restore(manifest):
     print(f"Restored timestamps for {restored} unchanged source files.")
 
 
-def save(manifest):
+def save(manifest, source_only=False):
     files = {}
     hashes = {}
-    dependencies = dependency_files(manifest)
+    dependencies = [] if source_only else dependency_files(manifest)
     for path in tracked_files() + dependencies:
         if path.is_file() and not path.is_symlink():
             files[os.fspath(path)] = path.stat().st_mtime_ns
@@ -86,5 +86,12 @@ def save(manifest):
 
 
 if __name__ == "__main__":
-    command, path = sys.argv[1:]
-    {"restore": restore, "save": save}[command](Path(path))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("restore", "save"))
+    parser.add_argument("path", type=Path)
+    parser.add_argument("--source-only", action="store_true")
+    args = parser.parse_args()
+    if args.command == "save":
+        save(args.path, source_only=args.source_only)
+    else:
+        restore(args.path)
