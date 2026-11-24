@@ -255,8 +255,9 @@ public:
 	void invalidateChatListEntry();
 
 	void destroy();
-	void setDeleted();
+	void setDeleted(bool restored = false);
 	[[nodiscard]] bool isDeleted() const;
+	[[nodiscard]] bool isRestoredDeleted() const;
 	[[nodiscard]] bool wasDeletedAnimated() const;
 	void markDeletedAnimated();
 	void applyTTL(TimeId destroyAt);
@@ -839,6 +840,7 @@ private:
 	int _starsPaid = 0;
 	BusinessShortcutId _shortcutId = 0;
 	bool _deleted : 1 = false;
+	bool _restoredDeleted : 1 = false;
 	bool _deletedAnimated : 1 = false;
 	// Service-styled regular messages still accept ordinary content updates.
 	bool _isServiceMessage = false;

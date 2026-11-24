@@ -3416,7 +3416,7 @@ void ListWidget::checkActivation() {
 		const auto bottom = itemTop(view) + view->height();
 		if (_visibleBottom + _itemsRevealHeight >= bottom) {
 			const auto item = view->data();
-			if (item->isRegular()) {
+			if (item->isRegular() && !item->isRestoredDeleted()) {
 				delegate()->listMarkReadTill(item);
 				return;
 			}

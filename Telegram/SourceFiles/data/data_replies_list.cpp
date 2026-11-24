@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_replies_list.h"
 
+#include "ayu/deleted_messages.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
@@ -187,6 +188,12 @@ rpl::producer<MessagesSlice> RepliesList::source(
 			if (viewer->scheduled) {
 				viewer->scheduled = false;
 				if (buildFromData(viewer)) {
+					if (_owningTopic && !_creating) {
+						AyuMessages::AppendDeletedMessages(
+							_history,
+							viewer->slice,
+							_rootId);
+					}
 					appendClientSideMessages(viewer->slice);
 					consumer.put_next_copy(viewer->slice);
 				}
@@ -480,7 +487,7 @@ bool RepliesList::applyUpdate(const MessageUpdate &update) {
 	const auto added = (update.flags & Flag::ReplyToTopAdded);
 	const auto i = ranges::lower_bound(_list, id, std::greater<>());
 	if (update.flags & Flag::Destroyed) {
-		if (!added && inThread) {
+		if (!added && inThread && !update.item->isRestoredDeleted()) {
 			changeUnreadCountByPost(id, -1);
 		}
 		if (i == end(_list) || *i != id) {

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_history_messages.h"
 
 #include "apiwrap.h"
+#include "ayu/deleted_messages.h"
 #include "data/data_changes.h"
 #include "data/data_chat.h"
 #include "data/data_forum_topic.h"
@@ -482,6 +483,7 @@ rpl::producer<MessagesSlice> HistoryMessagesViewer(
 			viewer->slice = HistoryBaseMessagesSlice(
 				*viewer->sparse,
 				viewer->queryAroundId);
+			AyuMessages::AppendDeletedMessages(history, viewer->slice);
 			const auto confirmed = ConfirmedHistoryMessages(
 				history,
 				&viewer->confirmed,

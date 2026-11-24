@@ -315,7 +315,7 @@ void map(not_null<HistoryItem*> item, AyuMessageBase &message) {
 	message.groupedId = item->groupId().raw();
 	message.peerId = item->history()->peer->id.value & PeerId::kChatTypeMask;
 	message.fromId = item->from()->id.value;
-	if (item->topic()) {
+	if (item->history()->peer->isForum()) {
 		message.topicId = item->topicRootId().bare;
 	} else {
 		message.topicId = 0;

@@ -5735,7 +5735,9 @@ void ChatWidget::listTextSelectionUpdated() {
 }
 
 void ChatWidget::listMarkReadTill(not_null<HistoryItem*> item) {
-	if (_replies) {
+	if (item->isRestoredDeleted()) {
+		return;
+	} else if (_replies) {
 		_replies->readTill(item);
 	} else if (_sublist) {
 		_sublist->readTill(item);
@@ -5949,6 +5951,9 @@ bool ChatWidget::listElementHideReply(not_null<const Element*> view) {
 
 bool ChatWidget::listElementShownUnread(not_null<const Element*> view) {
 	const auto item = view->data();
+	if (item->isRestoredDeleted()) {
+		return false;
+	}
 	return _replies
 		? _replies->isServerSideUnread(item)
 		: _sublist

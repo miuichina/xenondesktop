@@ -722,10 +722,11 @@ not_null<HistoryItem*> History::insertItem(
 void History::destroyMessage(not_null<HistoryItem*> item) {
 	Expects(item->isHistoryEntry() || !item->mainView());
 
+	const auto deleted = item->isDeleted();
 	if (item->isHistoryEntry()) {
 		// All this must be done for all items manually in History::clear()!
 		item->destroyHistoryEntry();
-		if (item->isRegular()) {
+		if (item->isRegular() && !item->isRestoredDeleted()) {
 			if (const auto messages = _messages.get()) {
 				messages->removeOne(item->id);
 			}
@@ -756,9 +757,23 @@ void History::destroyMessage(not_null<HistoryItem*> item) {
 	Assert(i != end(_items));
 	_items.erase(i);
 
+	if (deleted) {
+		session().changes().historyUpdated(this, UpdateFlag::ClientSideMessages);
+	}
 	if (documentToCancel) {
 		session().data().documentMessageRemoved(documentToCancel);
 	}
+}
+
+std::vector<not_null<HistoryItem*>> History::collectDeletedMessages(
+		MsgId topicId) const {
+	auto result = std::vector<not_null<HistoryItem*>>();
+	for (const auto &item : _items) {
+		if (item->isDeleted() && (!topicId || item->topicRootId() == topicId)) {
+			result.push_back(item.get());
+		}
+	}
+	return result;
 }
 
 void History::destroyMessagesByDates(TimeId minDate, TimeId maxDate) {
@@ -4294,7 +4309,9 @@ void History::checkLocalMessages() {
 	const auto maxId = loadedAtBottom() ? 0 : maxMsgId().bare + 1;
 	const auto restored = AyuMessages::RestoreDeletedMessages(this, minId, maxId);
 	for (const auto item : restored) {
-		insertMessageToBlocks(item);
+		if (!item->mainView()) {
+			insertMessageToBlocks(item);
+		}
 	}
 	const auto firstDate = loadedAtTop()
 		? 0

@@ -2,6 +2,10 @@
 
 #include "ayu/data/entities.h"
 
+namespace Data {
+struct MessagesSlice;
+} // namespace Data
+
 namespace Ui {
 class Show;
 } // namespace Ui
@@ -37,7 +41,12 @@ void ProcessMessageDelete(not_null<HistoryItem*> item);
 [[nodiscard]] std::vector<not_null<HistoryItem*>> RestoreDeletedMessages(
 	not_null<History*> history,
 	ID minId,
-	ID maxId);
+	ID maxId,
+	ID topicId = 0);
+void AppendDeletedMessages(
+	not_null<History*> history,
+	Data::MessagesSlice &slice,
+	MsgId topicId = 0);
 void PrepareDeletedReply(not_null<History*> history,
 	TextWithTags &text,
 	FullReplyTo &replyTo);

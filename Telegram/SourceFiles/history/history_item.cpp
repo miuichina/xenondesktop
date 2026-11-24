@@ -3267,7 +3267,7 @@ void HistoryItem::destroyHistoryEntry() {
 			topic->unreadPollVotes().erase(id);
 		}
 	}
-	if (isRegular() && _history->peer->isMegagroup()) {
+	if (isRegular() && !isRestoredDeleted() && _history->peer->isMegagroup()) {
 		if (const auto reply = Get<HistoryMessageReply>()) {
 			changeReplyToTopCounter(reply, -1);
 		}
@@ -4395,9 +4395,10 @@ void HistoryItem::setPostAuthor(const QString &postAuthor) {
 	history()->owner().requestItemResize(this);
 }
 
-void HistoryItem::setDeleted() {
+void HistoryItem::setDeleted(bool restored) {
 	_deleted = true;
-	_deletedAnimated = true;
+	_restoredDeleted = restored;
+	_deletedAnimated = !restored;
 
 	// cleanup mentions and reactions as they tend to bug with deleted messages (e.g. can't remove mention)
 	if (isUnreadMention()) {
@@ -4436,6 +4437,10 @@ void HistoryItem::setDeleted() {
 
 bool HistoryItem::isDeleted() const {
 	return _deleted;
+}
+
+bool HistoryItem::isRestoredDeleted() const {
+	return _restoredDeleted;
 }
 
 bool HistoryItem::wasDeletedAnimated() const {

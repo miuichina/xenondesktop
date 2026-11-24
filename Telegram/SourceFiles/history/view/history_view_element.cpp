@@ -1743,7 +1743,9 @@ not_null<HistoryItem*> Element::lastDisplayedAlbumItemOrSelf() const {
 	if (group && group->items.front() == item) {
 		for (auto i = int(group->items.size()); i > 0;) {
 			const auto part = group->items[--i];
-			if (part->isRegular() && !_media->groupItemRect(i).isEmpty()) {
+			if (part->isRegular()
+				&& !part->isRestoredDeleted()
+				&& !_media->groupItemRect(i).isEmpty()) {
 				return part;
 			}
 		}

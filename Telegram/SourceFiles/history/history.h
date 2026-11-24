@@ -152,6 +152,8 @@ public:
 	}
 
 	void destroyMessage(not_null<HistoryItem*> item);
+	[[nodiscard]] std::vector<not_null<HistoryItem*>> collectDeletedMessages(
+		MsgId topicId) const;
 	void destroyMessagesByDates(TimeId minDate, TimeId maxDate);
 	void destroyMessagesByTopic(MsgId topicRootId);
 	void destroyMessagesBySublist(not_null<PeerData*> sublistPeer);

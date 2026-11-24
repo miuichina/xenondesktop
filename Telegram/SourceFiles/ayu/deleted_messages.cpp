@@ -11,9 +11,9 @@
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "data/data_forum_topic.h"
+#include "data/data_messages.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
-#include "history/view/history_view_element.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_edition.h"
@@ -224,13 +224,19 @@ void ProcessMessageDelete(not_null<HistoryItem*> item) {
 std::vector<not_null<HistoryItem*>> RestoreDeletedMessages(
 		not_null<History*> history,
 		ID minId,
-		ID maxId) {
+		ID maxId,
+		ID topicId) {
 	auto result = std::vector<not_null<HistoryItem*>>();
 	const auto user = history->peer->asUser();
 	if (!SaveDeletedMessages() || (user && user->isBot() && !SaveForBots())) {
 		return result;
 	}
-	const auto messages = getDeletedMessages(history->peer, 0, minId, maxId, -1);
+	const auto messages = getDeletedMessages(
+		history->peer,
+		topicId,
+		minId,
+		maxId,
+		-1);
 	for (const auto &message : ranges::views::reverse(messages)) {
 		if (message.messageId <= 0) {
 			continue;
@@ -239,7 +245,7 @@ std::vector<not_null<HistoryItem*>> RestoreDeletedMessages(
 			history->peer,
 			MsgId(message.messageId));
 		if (item) {
-			if (item->isDeleted() && !item->mainView()) {
+			if (item->isDeleted()) {
 				result.push_back(item);
 			}
 			continue;
@@ -272,11 +278,76 @@ std::vector<not_null<HistoryItem*>> RestoreDeletedMessages(
 			.groupedId = uint64(message.groupedId),
 			.editDate = (message.flags & 0x00008000) ? message.editDate : 0,
 		}, message);
-		item->setDeleted();
-		item->markDeletedAnimated();
+		item->setDeleted(/*restored=*/true);
 		result.push_back(item);
 	}
 	return result;
+}
+
+void AppendDeletedMessages(
+		not_null<History*> history,
+		Data::MessagesSlice &slice,
+		MsgId topicId) {
+	if (!SaveDeletedMessages()) {
+		return;
+	}
+	struct Bounds {
+		MsgId first = 0;
+		MsgId last = 0;
+	};
+	const auto migrated = topicId ? nullptr : history->migrateFrom();
+	auto current = Bounds();
+	auto previous = Bounds();
+	for (const auto &id : slice.ids) {
+		const auto isCurrent = (id.peer == history->peer->id);
+		if (!IsServerMsgId(id.msg)
+			|| id.msg == topicId
+			|| (!isCurrent && (!migrated || id.peer != migrated->peer->id))) {
+			continue;
+		}
+		auto &bounds = isCurrent ? current : previous;
+		if (!bounds.first || id.msg < bounds.first) {
+			bounds.first = id.msg;
+		}
+		bounds.last = std::max(bounds.last, id.msg);
+	}
+	const auto atStart = (slice.skippedBefore == 0);
+	const auto atEnd = (slice.skippedAfter == 0);
+	const auto append = [&](not_null<History*> source,
+			Bounds bounds,
+			bool fromStart,
+			bool tillEnd) {
+		if (!bounds.first && (!fromStart || !tillEnd)) {
+			return;
+		}
+		const auto restored = RestoreDeletedMessages(
+			source,
+			fromStart ? 0 : bounds.first.bare - 1,
+			tillEnd ? 0 : bounds.last.bare + 1,
+			topicId.bare);
+		for (const auto item : restored) {
+			const auto id = item->fullId();
+			if (ranges::contains(slice.ids, id)) {
+				continue;
+			}
+			const auto position = item->position();
+			const auto where = ranges::find_if(slice.ids, [&](FullMsgId other) {
+				if (migrated && other.peer != id.peer) {
+					return id.peer == migrated->peer->id;
+				}
+				const auto existing = history->owner().message(other);
+				return existing && (existing->position() > position);
+			});
+			slice.ids.insert(where, id);
+		}
+	};
+	if (migrated) {
+		append(migrated, previous, atStart, atEnd || current.first != 0);
+	}
+	append(history, current, atStart || previous.first != 0, atEnd);
+	if (!slice.nearestToAround && !slice.ids.empty()) {
+		slice.nearestToAround = slice.ids.back();
+	}
 }
 
 void PrepareDeletedReply(not_null<History*> history,
@@ -310,18 +381,8 @@ void ClearDeletedMessages(std::shared_ptr<Ui::Show> show,
 		.confirmed =
 			[=](Fn<void()> close) {
 				auto items = std::vector<not_null<HistoryItem*>>();
-				if (const auto history
-					= peer->owner().historyLoaded(peer->id)) {
-					for (const auto &block : history->blocks) {
-						for (const auto &view : block->messages) {
-							const auto item = view->data();
-							if (item->isDeleted()
-								&& (!topicId
-									|| item->topicRootId().bare == topicId)) {
-								items.push_back(item);
-							}
-						}
-					}
+				if (const auto history = peer->owner().historyLoaded(peer->id)) {
+					items = history->collectDeletedMessages(MsgId(topicId));
 				}
 				AyuMessages::clearDeletedMessages(peer, topicId);
 				peer->owner().notifyItemsAboutToBeDestroyed(items);
