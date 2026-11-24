@@ -9,6 +9,7 @@ run-name: Windows x64 Release | ${{ github.event_name }} | ${{ github.ref_name }
     paths-ignore: ['**.md', 'docs/**', 'changelog.txt']
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -47,7 +48,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force "$env:BUILD_ROOT\Libraries", "$env:BUILD_ROOT\ThirdParty", "$env:GITHUB_WORKSPACE\logs" | Out-Null
           $key = '${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/**', 'TBuild/tdesktop/Telegram/build/qt_version.py') }}'
-          "DEPENDENCY_KEY=windows-x64-msvc144-qt6-release-v2-$key" >> $env:GITHUB_ENV
+          "DEPENDENCY_RECIPE_KEY=$key" >> $env:GITHUB_ENV
+          "PREVIOUS_DEPENDENCY_KEY=windows-x64-msvc144-qt6-release-v2-$key" >> $env:GITHUB_ENV
           "LEGACY_DEPENDENCY_KEY=windows-x64-msvc144-qt6-release-v1-$key" >> $env:GITHUB_ENV
 
       - name: Prepare ATL cache path
@@ -98,15 +100,52 @@ jobs:
           sdk: 10.0.26100.0
           toolset: '14.44'
 
+      - name: Prepare Windows cache keys
+        shell: pwsh
+        run: |
+          $toolset = $env:VCToolsVersion.TrimEnd('\')
+          $sdk = $env:WindowsSDKVersion.TrimEnd('\')
+          $qt = python -c 'import os, sys; sys.path.insert(0, sys.argv[1]); import qt_version; qt_version.resolve(""); print(os.environ["QT"])' "$env:SOURCE_ROOT\Telegram\build"
+          if ($LASTEXITCODE -ne 0 -or !$qt) { throw 'Could not resolve Qt for Windows' }
+          $cmake = (cmake --version | Select-Object -First 1).Replace(' ', '-')
+          $dependencies = "windows-dependencies-v3-x64-$toolset-$sdk"
+          $objects = "windows-objects-v2-x64-$toolset-$sdk-qt-$qt"
+          "DEPENDENCY_PREFIX=$dependencies" >> $env:GITHUB_ENV
+          "DEPENDENCY_KEY=$dependencies-$env:DEPENDENCY_RECIPE_KEY" >> $env:GITHUB_ENV
+          "BUILD_CACHE_PREFIX=$objects" >> $env:GITHUB_ENV
+          "BUILD_CACHE_EXACT_PREFIX=$objects-$cmake" >> $env:GITHUB_ENV
+          "LEGACY_BUILD_CACHE_PREFIX=windows-objects-v1-$env:PREVIOUS_DEPENDENCY_KEY-$toolset-$sdk-$cmake" >> $env:GITHUB_ENV
+
       - name: Restore dependencies
         id: dependencies
+        continue-on-error: true
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
             ${{ env.BUILD_ROOT }}\Libraries
             ${{ env.BUILD_ROOT }}\ThirdParty
           key: ${{ env.DEPENDENCY_KEY }}
-          restore-keys: ${{ env.LEGACY_DEPENDENCY_KEY }}
+          restore-keys: |
+            ${{ env.PREVIOUS_DEPENDENCY_KEY }}
+            ${{ env.LEGACY_DEPENDENCY_KEY }}
+            ${{ env.DEPENDENCY_PREFIX }}-
+
+      - name: Find Windows dependency backup
+        if: github.event_name == 'push'
+        id: dependency_backup
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python "$env:SOURCE_ROOT\.github\scripts\windows_dependency_backup.py" find
+
+      - name: Restore Windows dependency backup
+        if: steps.dependencies.outputs.cache-matched-key == '' && steps.dependency_backup.outputs.run-id != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKUP_RUN_ID: ${{ steps.dependency_backup.outputs.run-id }}
+          BACKUP_NAME: ${{ steps.dependency_backup.outputs.name }}
+        run: python "$env:SOURCE_ROOT\.github\scripts\windows_dependency_backup.py" restore
 
       - name: Prepare dependencies
         shell: pwsh
@@ -139,6 +178,7 @@ jobs:
 
       - name: Save dependencies
         if: github.event_name != 'pull_request' && steps.dependencies.outputs.cache-hit != 'true'
+        continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
@@ -146,13 +186,28 @@ jobs:
             ${{ env.BUILD_ROOT }}\ThirdParty
           key: ${{ env.DEPENDENCY_KEY }}
 
-      - name: Prepare Telegram cache key
+      - name: Pack Windows dependency backup
+        if: github.event_name == 'push' && steps.dependency_backup.outputs.fresh != 'true'
+        id: pack_dependency_backup
+        continue-on-error: true
+        run: python "$env:SOURCE_ROOT\.github\scripts\windows_dependency_backup.py" pack
+
+      - name: Upload Windows dependency backup
+        if: steps.pack_dependency_backup.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ${{ env.DEPENDENCY_KEY }}
+          path: ${{ runner.temp }}/windows-dependencies.tar.gz
+          retention-days: 30
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Remove temporary dependency archive
+        if: always() && steps.pack_dependency_backup.outcome != 'skipped'
         shell: pwsh
-        run: |
-          $toolset = $env:VCToolsVersion.TrimEnd('\')
-          $sdk = $env:WindowsSDKVersion.TrimEnd('\')
-          $cmake = (cmake --version | Select-Object -First 1).Replace(' ', '-')
-          "BUILD_CACHE_PREFIX=windows-objects-v1-$env:DEPENDENCY_KEY-$toolset-$sdk-$cmake" >> $env:GITHUB_ENV
+        run: Remove-Item -LiteralPath "$env:RUNNER_TEMP\windows-dependencies.tar.gz" -ErrorAction SilentlyContinue
 
       - name: Restore Telegram build
         if: github.event_name != 'pull_request'
@@ -160,8 +215,11 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ env.SOURCE_ROOT }}\out
-          key: ${{ env.BUILD_CACHE_PREFIX }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ${{ env.BUILD_CACHE_PREFIX }}-
+          key: ${{ env.BUILD_CACHE_EXACT_PREFIX }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ env.BUILD_CACHE_EXACT_PREFIX }}-
+            ${{ env.LEGACY_BUILD_CACHE_PREFIX }}-
+            ${{ env.BUILD_CACHE_PREFIX }}-
 
       - name: Restore unchanged source timestamps
         if: github.event_name != 'pull_request'
