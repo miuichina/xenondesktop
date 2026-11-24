@@ -1930,8 +1930,8 @@ void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 		_loadedAtTop = true;
 		addEdgesToSharedMedia();
 	}
-	checkLocalMessages();
 	checkLastMessage();
+	checkLocalMessages();
 }
 
 void History::addCreatedOlderSlice(
@@ -1983,8 +1983,8 @@ void History::addNewerSlice(const QVector<MTPMessage> &slice) {
 		checkAddAllToUnreadMentions();
 	}
 
-	checkLocalMessages();
 	checkLastMessage();
+	checkLocalMessages();
 }
 
 void History::checkLastMessage() {

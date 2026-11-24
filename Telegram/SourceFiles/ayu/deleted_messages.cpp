@@ -6,9 +6,7 @@
 // Copyright @Radolyn, 2026
 #include "ayu/deleted_messages.h"
 
-#include "api/api_text_entities.h"
 #include "ayu/data/messages_storage.h"
-#include "ayu/utils/ayu_mapper.h"
 #include "ayu/ui/message_history/history_section.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -259,11 +257,10 @@ std::vector<not_null<HistoryItem*>> RestoreDeletedMessages(
 		if (message.flags & 0x00200000) {
 			flags |= MessageFlag::HideEdited;
 		}
-		auto text = TextWithEntities{ QString::fromStdString(message.text) };
-		text.entities = Api::EntitiesFromMTP(
-			&history->session(),
-			AyuMapper::deserializeTextWithEntities(message.textEntities).v);
-		item = history->makeMessage({
+		if (message.flags & 0x08000000) {
+			flags |= MessageFlag::InvertMedia;
+		}
+		item = MakeSavedMessage(history, {
 			.id = MsgId(message.messageId),
 			.flags = flags,
 			.from = MessageSender(history->peer, message),
@@ -272,8 +269,9 @@ std::vector<not_null<HistoryItem*>> RestoreDeletedMessages(
 				.topicRootId = MsgId(message.topicId),
 			},
 			.date = message.date,
+			.groupedId = uint64(message.groupedId),
 			.editDate = (message.flags & 0x00008000) ? message.editDate : 0,
-		}, text, MTP_messageMediaEmpty());
+		}, message);
 		item->setDeleted();
 		item->markDeletedAnimated();
 		result.push_back(item);

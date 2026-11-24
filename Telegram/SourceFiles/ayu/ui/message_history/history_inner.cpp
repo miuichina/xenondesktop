@@ -745,7 +745,7 @@ void InnerWidget::preloadMore(Direction direction) {
 				perPage);
 			messages.assign(saved.begin(), saved.end());
 		} else {
-			const auto saved = AyuDatabase::getDeletedMessages(
+			auto saved = AyuDatabase::getDeletedMessages(
 				userId,
 				dialogId,
 				topicId,
@@ -753,7 +753,9 @@ void InnerWidget::preloadMore(Direction direction) {
 				maxId,
 				perPage,
 				searchQuery);
-			messages.assign(saved.begin(), saved.end());
+			messages.assign(
+				std::make_move_iterator(saved.begin()),
+				std::make_move_iterator(saved.end()));
 		}
 
 		crl::on_main([=, messages = std::move(messages)]() mutable {

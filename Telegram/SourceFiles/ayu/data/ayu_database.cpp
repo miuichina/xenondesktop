@@ -199,10 +199,10 @@ bool hasRevisions(ID userId, ID dialogId, ID messageId) {
 	}
 }
 
-void addDeletedMessage(const DeletedMessage &message) {
+ID addDeletedMessage(const DeletedMessage &message) {
 	std::lock_guard lock(databaseMutex);
 	if (!Initialize()) {
-		return;
+		return 0;
 	}
 	try {
 		MessageStorage().begin_transaction();
@@ -212,15 +212,32 @@ void addDeletedMessage(const DeletedMessage &message) {
 				== message.dialogId
 			and column<DeletedMessage>(&DeletedMessage::messageId)
 				== message.messageId));
-		MessageStorage().insert(message);
+		const auto rowId = MessageStorage().insert(message);
 		MessageStorage().commit();
+		return rowId;
 	} catch (std::exception &ex) {
 		try {
 			MessageStorage().rollback();
 		} catch (...) {
 		}
-		LOG(("Failed to save edited message for some reason: %1")
+		LOG(("Failed to save deleted message: %1")
 				.arg(ex.what()));
+		return 0;
+	}
+}
+
+void setDeletedMediaBytes(ID rowId, std::vector<char> bytes) {
+	std::lock_guard lock(databaseMutex);
+	if (!Initialize()) {
+		return;
+	}
+	try {
+		MessageStorage().update_all(
+			set(assign(column<DeletedMessage>(&DeletedMessage::thumbsSerialized),
+				std::move(bytes))),
+			where(column<DeletedMessage>(&DeletedMessage::fakeId) == rowId));
+	} catch (const std::exception &error) {
+		LOG(("Failed to save deleted media: %1").arg(error.what()));
 	}
 }
 

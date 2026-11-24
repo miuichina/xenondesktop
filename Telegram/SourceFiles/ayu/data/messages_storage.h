@@ -8,10 +8,17 @@
 
 #include "ayu/data/entities.h"
 
+struct HistoryItemCommonFields;
+
 namespace AyuMessages {
 
 [[nodiscard]] PeerId MessageSender(
 	not_null<PeerData*> peer,
+	const AyuMessageBase &message);
+
+[[nodiscard]] not_null<HistoryItem*> MakeSavedMessage(
+	not_null<History*> history,
+	HistoryItemCommonFields fields,
 	const AyuMessageBase &message);
 
 void addEditedMessage(not_null<HistoryItem*> item);

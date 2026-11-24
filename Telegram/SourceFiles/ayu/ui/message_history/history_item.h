@@ -21,7 +21,7 @@ class OwnedItem;
 
 void GenerateItems(not_null<HistoryView::ElementDelegate*> delegate,
 	not_null<History*> history,
-	AyuMessageBase message,
+	const AyuMessageBase &message,
 	Fn<void(OwnedItem item, TimeId sentDate, MsgId)> callback);
 
 // Smart pointer wrapper for HistoryItem* that destroys the owned item.

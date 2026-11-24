@@ -6,11 +6,9 @@
 // Copyright @Radolyn, 2026
 #include "ayu/ui/message_history/history_item.h"
 
-#include "api/api_text_entities.h"
 #include "ayu/data/entities.h"
 #include "ayu/data/messages_storage.h"
 #include "ayu/ui/message_history/history_inner.h"
-#include "ayu/utils/ayu_mapper.h"
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
@@ -59,7 +57,7 @@ void OwnedItem::clearView() {
 
 void GenerateItems(not_null<HistoryView::ElementDelegate*> delegate,
 	not_null<History*> history,
-	AyuMessageBase message,
+	const AyuMessageBase &message,
 	Fn<void(OwnedItem item, TimeId sentDate, MsgId)> callback) {
 	const auto from = history->owner().peer(
 		AyuMessages::MessageSender(history->peer, message));
@@ -70,43 +68,26 @@ void GenerateItems(not_null<HistoryView::ElementDelegate*> delegate,
 		return callback(OwnedItem(delegate, item), sentDate, realId);
 	};
 
-	const auto makeSimpleTextMessage = [&](TextWithEntities &&text) {
-		base::flags<MessageFlag> flags = MessageFlag::AdminLogEntry;
-		if (from) {
-			flags |= MessageFlag::HasFromId;
-		} else {
-			flags |= MessageFlag::HasPostAuthor;
-		}
-		if (!message.postAuthor.empty()) {
-			flags |= MessageFlag::HasPostAuthor;
-		}
-
-		return history->makeMessage(
-			{
-				.id = history->nextNonHistoryEntryId(),
-				.flags = flags,
-				.from = from ? from->id : 0,
-				.date = date,
-				.postAuthor = !message.postAuthor.empty()
-					? QString::fromStdString(message.postAuthor)
-					: from ? QString()
-						   : QString("unknown user: %1").arg(message.fromId),
-			},
-			std::move(text),
-			MTP_messageMediaEmpty());
-	};
-
-	const auto addSimpleTextMessage = [&](TextWithEntities &&text) {
-		addPart(makeSimpleTextMessage(std::move(text)));
-	};
-
-	const auto text = QString::fromStdString(message.text);
-	auto textAndEntities = Ui::Text::WithEntities(text);
-	const auto entities
-		= AyuMapper::deserializeTextWithEntities(message.textEntities);
-	textAndEntities.entities
-		= Api::EntitiesFromMTP(&history->session(), entities.v);
-	addSimpleTextMessage(std::move(textAndEntities));
+	auto flags = MessageFlags(MessageFlag::AdminLogEntry);
+	if (from) {
+		flags |= MessageFlag::HasFromId;
+	}
+	if (!from || !message.postAuthor.empty()) {
+		flags |= MessageFlag::HasPostAuthor;
+	}
+	if (message.flags & 0x08000000) {
+		flags |= MessageFlag::InvertMedia;
+	}
+	addPart(MakeSavedMessage(history, {
+		.id = history->nextNonHistoryEntryId(),
+		.flags = flags,
+		.from = from ? from->id : 0,
+		.date = date,
+		.postAuthor = !message.postAuthor.empty()
+			? QString::fromStdString(message.postAuthor)
+			: from ? QString()
+				   : QString("unknown user: %1").arg(message.fromId),
+	}, message));
 }
 
 } // namespace MessageHistory

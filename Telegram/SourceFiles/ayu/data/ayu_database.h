@@ -19,7 +19,8 @@ std::vector<EditedMessage> getEditedMessages(ID userId,
 	ID maxId,
 	int totalLimit);
 bool hasRevisions(ID userId, ID dialogId, ID messageId);
-void addDeletedMessage(const DeletedMessage &message);
+[[nodiscard]] ID addDeletedMessage(const DeletedMessage &message);
+void setDeletedMediaBytes(ID rowId, std::vector<char> bytes);
 std::vector<DeletedMessage> getDeletedMessages(ID userId,
 	ID dialogId,
 	ID topicId,
