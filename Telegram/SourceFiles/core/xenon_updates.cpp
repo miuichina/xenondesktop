@@ -24,10 +24,10 @@
 
 #ifdef Q_OS_LINUX
 #include "platform/linux/update_install_linux.h"
-#elif defined Q_OS_WIN
-#include "platform/win/update_install_win.h"
 
 #include <ksandbox.h>
+#elif defined Q_OS_WIN
+#include "platform/win/update_install_win.h"
 #endif // Q_OS_LINUX
 
 #include <limits>
