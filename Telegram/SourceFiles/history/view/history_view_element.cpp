@@ -1737,6 +1737,20 @@ bool Element::hasVisibleContent(int visibleTop, int visibleBottom) const {
 	return !isHidden() && top < bottom;
 }
 
+not_null<HistoryItem*> Element::lastDisplayedAlbumItemOrSelf() const {
+	const auto item = data();
+	const auto group = _media ? history()->owner().groups().find(item) : nullptr;
+	if (group && group->items.front() == item) {
+		for (auto i = int(group->items.size()); i > 0;) {
+			const auto part = group->items[--i];
+			if (part->isRegular() && !_media->groupItemRect(i).isEmpty()) {
+				return part;
+			}
+		}
+	}
+	return item;
+}
+
 void Element::overrideMedia(std::unique_ptr<Media> media) {
 	Expects(!history()->owner().groups().find(data()));
 

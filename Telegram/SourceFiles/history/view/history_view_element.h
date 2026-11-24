@@ -500,6 +500,7 @@ public:
 	[[nodiscard]] virtual int marginTop() const = 0;
 	[[nodiscard]] virtual int marginBottom() const = 0;
 	[[nodiscard]] bool hasVisibleContent(int visibleTop, int visibleBottom) const;
+	[[nodiscard]] not_null<HistoryItem*> lastDisplayedAlbumItemOrSelf() const;
 
 	void addVerticalMargins(int top, int bottom);
 

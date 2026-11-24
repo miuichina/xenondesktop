@@ -1665,11 +1665,19 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 			: isUnread
 			? unreadShown()
 			: yShown(top + height / 2);
-		if (isUnread && !isSponsored && (readOnAppearance
-				? view->hasVisibleContent(
-					_visibleAreaTop - top,
-					_visibleAreaBottom - top)
-				: markShown)) {
+		if (readOnAppearance
+			&& !isSponsored
+			&& item->history() == _history
+			&& view->hasVisibleContent(
+				_visibleAreaTop - top,
+				_visibleAreaBottom - top)) {
+			const auto till = view->lastDisplayedAlbumItemOrSelf();
+			if (!till->out()
+				&& till->unread(_history)
+				&& (!readTill || readTill->id < till->id)) {
+				readTill = till;
+			}
+		} else if (!readOnAppearance && isUnread && !isSponsored && markShown) {
 			readTill = item;
 		}
 		if (markShown) {

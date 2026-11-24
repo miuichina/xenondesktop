@@ -3632,12 +3632,21 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 				: isUnread
 				? unreadShown()
 				: yShown(top + height / 2));
-		if (isUnread && !isSponsored && _context != Context::ChatPreview
-			&& (readOnAppearance
-				? view->hasVisibleContent(
-					_visibleTop - top,
-					_visibleBottom - top)
-				: markShown)) {
+		if (readOnAppearance
+			&& !isSponsored
+			&& _context != Context::ChatPreview
+			&& view->hasVisibleContent(
+				_visibleTop - top,
+				_visibleBottom - top)) {
+			const auto till = view->lastDisplayedAlbumItemOrSelf();
+			const auto tillView = (till != item) ? viewForItem(till) : nullptr;
+			const auto tillUnread = isUnread
+				|| (tillView && _delegate->listElementShownUnread(tillView));
+			if (tillUnread
+				&& (!readTill || readTill->id < till->id)) {
+				readTill = till;
+			}
+		} else if (!readOnAppearance && isUnread && !isSponsored && markShown) {
 			readTill = item;
 		}
 		if (markShown) {
