@@ -3,7 +3,7 @@ contact_links:
   - name: 📱🎨🌍 Mobile apps, UI/UX Design, or Missing Features
     url: https://bugs.telegram.org
     about: 🛑 Not EXCLUSIVELY a Telegram Desktop app bug? UI complaint? CLICK HERE.
-  - name: 📝 I found a typo or translation error
+  - name: 📝 I found a typo or translation error.
     url: https://translations.telegram.org
     about: 🛑 DO NOT OPEN AN ISSUE. Translations are crowdsourced. Suggest fixes there.
   - name: 🚫 My account is banned / I can't log in
