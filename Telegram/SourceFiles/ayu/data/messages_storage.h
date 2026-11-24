@@ -8,6 +8,7 @@
 
 #include "ayu/data/entities.h"
 
+class History;
 struct HistoryItemCommonFields;
 
 namespace AyuMessages {
