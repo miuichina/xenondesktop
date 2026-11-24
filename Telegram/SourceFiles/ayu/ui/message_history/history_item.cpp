@@ -78,7 +78,7 @@ void GenerateItems(not_null<HistoryView::ElementDelegate*> delegate,
 	if (message.flags & 0x08000000) {
 		flags |= MessageFlag::InvertMedia;
 	}
-	addPart(MakeSavedMessage(history, {
+	addPart(AyuMessages::MakeSavedMessage(history, {
 		.id = history->nextNonHistoryEntryId(),
 		.flags = flags,
 		.from = from ? from->id : 0,
