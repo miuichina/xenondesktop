@@ -4897,6 +4897,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_emoji_featured_unlock" = "Unlock";
 "lng_emoji_premium_restore" = "Restore";
 "lng_gifs_no_saved" = "You have no saved GIFs yet.";
+"lng_settings_local_saved_gifs" = "Save GIFs beyond the cloud limit";
+"lng_settings_local_saved_gifs_about" = "Extra GIFs are kept on this device. Turn this off to show only your cloud GIFs.";
 "lng_gif_collections_all" = "All GIFs";
 "lng_gif_collections_add" = "Add to collection";
 "lng_gif_collections_set_default" = "Set as default";

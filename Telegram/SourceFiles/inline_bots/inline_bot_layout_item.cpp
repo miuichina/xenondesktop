@@ -272,6 +272,9 @@ QString ItemBase::getResultThumbLetter() const {
 }
 
 Data::FileOrigin ItemBase::fileOrigin() const {
+	if (_document && _document->isGifv()) {
+		return _document->stickerOrGifOrigin();
+	}
 	return _context->inlineItemFileOrigin();
 }
 

@@ -44,7 +44,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/session/send_as_peers.h"
 #include "window/window_session_controller.h"
 #include "history/view/history_view_cursor_state.h"
-#include "storage/storage_account.h" // Account::writeSavedGifs
 #include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_boxes.h"
@@ -254,9 +253,8 @@ void AddGifAction(
 	if (!document->isGifv()) {
 		return;
 	}
-	auto &data = document->owner();
-	const auto index = data.stickers().savedGifs().indexOf(document);
-	const auto saved = (index >= 0);
+	const auto &gifs = document->owner().stickers().displayedSavedGifs();
+	const auto saved = gifs.contains(document);
 	const auto text = (saved
 		? tr::lng_context_delete_gif
 		: tr::lng_context_save_gif)(tr::now);
@@ -264,18 +262,14 @@ void AddGifAction(
 		? *iconsOverride
 		: st::defaultComposeIcons;
 	callback(text, [=] {
-		Api::ToggleSavedGif(
-			show,
-			document,
-			Data::FileOriginSavedGifs(),
-			!saved);
-
-		const auto &data = document->owner();
-		if (saved) {
-			data.stickers().savedGifsRef().remove(index);
-			document->session().local().writeSavedGifs();
+		auto &stickers = document->owner().stickers();
+		if (stickers.displayedSavedGifs().contains(document) == saved) {
+			Api::ToggleSavedGif(
+				show,
+				document,
+				document->stickerOrGifOrigin(),
+				!saved);
 		}
-		data.stickers().notifySavedGifsUpdated();
 	}, saved ? &icons.menuGifRemove : &icons.menuGifAdd);
 }
 
@@ -827,7 +821,7 @@ void GifsListWidget::refreshSavedGifs() {
 		if (const auto collection = stickers.gifCollection(_collectionId)) {
 			addGifs(collection->gifs);
 		} else {
-			addGifs(stickers.savedGifs());
+			addGifs(stickers.displayedSavedGifs());
 		}
 		deleteUnusedGifLayouts();
 
@@ -1452,7 +1446,7 @@ void GifsListWidget::updateSelected() {
 			if (item) {
 				if (const auto preview = item->getPreviewDocument()) {
 					_show->showMediaPreview(
-						Data::FileOriginSavedGifs(),
+						preview->stickerOrGifOrigin(),
 						preview);
 				} else if (const auto preview = item->getPreviewPhoto()) {
 					_show->showMediaPreview(Data::FileOrigin(), preview);
@@ -1472,7 +1466,7 @@ void GifsListWidget::showPreview() {
 	if (const auto layout = _mosaic.maybeItemAt(_pressed)) {
 		if (const auto previewDocument = layout->getPreviewDocument()) {
 			_previewShown = _show->showMediaPreview(
-				Data::FileOriginSavedGifs(),
+				previewDocument->stickerOrGifOrigin(),
 				previewDocument);
 		} else if (const auto previewPhoto = layout->getPreviewPhoto()) {
 			_previewShown = _show->showMediaPreview(

@@ -1626,11 +1626,15 @@ Data::FileOrigin DocumentData::stickerSetOrigin() const {
 }
 
 Data::FileOrigin DocumentData::stickerOrGifOrigin() const {
-	return (sticker()
-		? stickerSetOrigin()
-		: isGifv()
-		? Data::FileOriginSavedGifs()
-		: Data::FileOrigin());
+	if (sticker()) {
+		return stickerSetOrigin();
+	} else if (isGifv()) {
+		if (const auto source = owner().stickers().localGifSource(id)) {
+			return Data::FileOrigin(source);
+		}
+		return Data::FileOriginSavedGifs();
+	}
+	return {};
 }
 
 SongData *DocumentData::song() {

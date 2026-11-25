@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "data/data_document.h"
 #include "data/data_file_origin.h"
+#include "data/data_premium_limits.h"
 #include "data/data_session.h"
 #include "data/stickers/data_stickers.h"
 #include "window/window_session_controller.h"
@@ -107,7 +108,19 @@ void ToggleSavedGif(
 		not_null<DocumentData*> document,
 		Data::FileOrigin origin,
 		bool saved) {
-	if (saved && !document->isGifv()) {
+	auto &stickers = document->owner().stickers();
+	if (saved) {
+		if (!document->isGifv()) {
+			return;
+		}
+		const auto source = std::get_if<Data::FileOriginMessage>(&origin.data);
+		if (stickers.saveGifLocally(document, source ? *source : FullMsgId())
+			&& !stickers.savedGifs().contains(document)
+			&& stickers.savedGifs().size()
+				>= Data::PremiumLimits(&document->session()).gifsCurrent()) {
+			return;
+		}
+	} else if (!stickers.removeSavedGif(document)) {
 		return;
 	}
 	auto done = [=] {

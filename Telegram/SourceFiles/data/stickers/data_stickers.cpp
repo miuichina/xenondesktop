@@ -49,6 +49,8 @@ namespace {
 constexpr auto kPremiumToastDuration = 5 * crl::time(1000);
 constexpr auto kSlice = 65536;
 constexpr auto kGifCollectionsPref = std::string_view("gifCollections");
+constexpr auto kKeepLocalGifsPref = std::string_view("keepLocalSavedGifs");
+constexpr auto kLocalSavedGifsPref = std::string_view("localSavedGifs");
 constexpr auto kDefaultGifCollectionPref = std::string_view("defaultGifCollection");
 
 using SetFlag = StickersSetFlag;
@@ -601,6 +603,178 @@ void Stickers::writeGifCollections() {
 	_gifCollectionsChanged.fire({});
 }
 
+bool Stickers::keepLocalSavedGifs() const {
+	return session().local().readPref<bool>(kKeepLocalGifsPref, false);
+}
+
+void Stickers::setKeepLocalSavedGifs(bool enabled) {
+	if (keepLocalSavedGifs() == enabled) {
+		return;
+	}
+	session().local().writePref<bool>(kKeepLocalGifsPref, enabled);
+	if (enabled) {
+		mergeLocalSavedGifs();
+	}
+	notifySavedGifsUpdated();
+}
+
+const SavedGifs &Stickers::displayedSavedGifs() {
+	if (!keepLocalSavedGifs()) {
+		return _savedGifs;
+	} else if (!_localSavedGifsLoaded) {
+		mergeLocalSavedGifs();
+	}
+	return _localSavedGifs;
+}
+
+bool Stickers::saveGifLocally(
+		not_null<DocumentData*> document,
+		FullMsgId source) {
+	if (!keepLocalSavedGifs()
+		|| !document->isGifv()
+		|| !document->hasRemoteLocation()
+		|| document->forbidsFileSave()) {
+		return false;
+	}
+	if (!_localSavedGifsLoaded) {
+		mergeLocalSavedGifs();
+	}
+	auto sourceChanged = false;
+	if (source.peer && IsServerMsgId(source.msg)) {
+		const auto i = _localGifSources.find(document->id);
+		if (i == end(_localGifSources) || i->second != source) {
+			_localGifSources[document->id] = source;
+			sourceChanged = true;
+		}
+	}
+	const auto index = _localSavedGifs.indexOf(document);
+	if (index != 0) {
+		if (index > 0) {
+			_localSavedGifs.remove(index);
+		}
+		_localSavedGifs.push_front(document);
+	}
+	if (index != 0 || sourceChanged) {
+		writeLocalSavedGifs();
+	}
+	if (index != 0) {
+		notifySavedGifsUpdated();
+	}
+	return true;
+}
+
+bool Stickers::removeSavedGif(not_null<DocumentData*> document) {
+	readLocalSavedGifs();
+	const auto removedLocal = _localSavedGifs.removeAll(document) > 0;
+	if (removedLocal) {
+		_localGifSources.remove(document->id);
+		writeLocalSavedGifs();
+	}
+	const auto removedCloud = _savedGifs.removeAll(document) > 0;
+	if (removedCloud) {
+		session().local().writeSavedGifs();
+	}
+	if (removedLocal || removedCloud) {
+		notifySavedGifsUpdated();
+	}
+	return removedCloud;
+}
+
+FullMsgId Stickers::localGifSource(DocumentId id) {
+	if (!keepLocalSavedGifs()) {
+		return {};
+	}
+	readLocalSavedGifs();
+	const auto i = _localGifSources.find(id);
+	return (i == end(_localGifSources)
+		|| ranges::contains(_savedGifs, id, &DocumentData::id))
+		? FullMsgId()
+		: i->second;
+}
+
+void Stickers::readLocalSavedGifs() {
+	if (_localSavedGifsLoaded) {
+		return;
+	}
+	_localSavedGifsLoaded = true;
+	const auto bytes = session().local().readPref<QByteArray>(
+		kLocalSavedGifsPref,
+		QByteArray());
+	if (bytes.isEmpty()) {
+		return;
+	}
+	auto stream = QDataStream(bytes);
+	stream.setVersion(QDataStream::Qt_5_1);
+	auto version = qint32();
+	auto count = quint32();
+	stream >> version >> count;
+	auto list = SavedGifs();
+	auto sources = base::flat_map<DocumentId, FullMsgId>();
+	auto seen = base::flat_set<DocumentId>();
+	for (auto entry = quint32(); entry < count; ++entry) {
+		auto peer = quint64();
+		auto message = qint64();
+		stream >> peer >> message;
+		const auto gif = Serialize::Document::readFromStream(
+			&session(),
+			version,
+			stream);
+		if (stream.status() != QDataStream::Ok) {
+			return;
+		}
+		if (gif && gif->isGifv() && seen.insert(gif->id).second) {
+			list.push_back(gif);
+			if (peer && IsServerMsgId(MsgId(message))) {
+				sources.emplace(gif->id, FullMsgId(
+					DeserializePeerId(peer),
+					MsgId(message)));
+			}
+		}
+	}
+	_localSavedGifs = std::move(list);
+	_localGifSources = std::move(sources);
+}
+
+void Stickers::writeLocalSavedGifs() {
+	if (_localSavedGifs.empty()) {
+		session().local().clearPref(kLocalSavedGifsPref);
+		return;
+	}
+	auto bytes = QByteArray();
+	auto stream = QDataStream(&bytes, QIODevice::WriteOnly);
+	stream.setVersion(QDataStream::Qt_5_1);
+	stream << qint32(AppVersion) << quint32(_localSavedGifs.size());
+	for (const auto gif : _localSavedGifs) {
+		const auto i = _localGifSources.find(gif->id);
+		const auto source = (i == end(_localGifSources))
+			? FullMsgId()
+			: i->second;
+		stream << quint64(SerializePeerId(source.peer)) << qint64(source.msg.bare);
+		Serialize::Document::writeToStream(stream, gif);
+	}
+	session().local().writePref<QByteArray>(kLocalSavedGifsPref, std::move(bytes));
+}
+
+void Stickers::mergeLocalSavedGifs() {
+	readLocalSavedGifs();
+	auto known = base::flat_set<DocumentData*>(
+		begin(_localSavedGifs),
+		end(_localSavedGifs));
+	auto additions = SavedGifs();
+	for (const auto gif : _savedGifs) {
+		if (gif->hasRemoteLocation()
+			&& !gif->forbidsFileSave()
+			&& known.insert(gif).second) {
+			additions.push_back(gif);
+		}
+	}
+	if (!additions.empty()) {
+		additions.append(_localSavedGifs);
+		_localSavedGifs = std::move(additions);
+		writeLocalSavedGifs();
+	}
+}
+
 void Stickers::addSavedGif(
 		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<DocumentData*> document) {
@@ -616,10 +790,12 @@ void Stickers::addSavedGif(
 	const auto limits = Data::PremiumLimits(session);
 	if (_savedGifs.size() > limits.gifsCurrent()) {
 		_savedGifs.pop_back();
-		MaybeShowPremiumToast(
-			show,
-			SavedGifsToast(limits),
-			LimitsPremiumRef("saved_gifs"));
+		if (!keepLocalSavedGifs()) {
+			MaybeShowPremiumToast(
+				show,
+				SavedGifsToast(limits),
+				LimitsPremiumRef("saved_gifs"));
+		}
 	}
 	session->local().writeSavedGifs();
 
@@ -637,6 +813,7 @@ void Stickers::checkSavedGif(not_null<HistoryItem*> item) {
 	if (const auto media = item->media()) {
 		if (const auto document = media->document()) {
 			if (document->isGifv()) {
+				saveGifLocally(document, item->fullId());
 				addSavedGif(nullptr, document);
 			}
 		}
@@ -1413,6 +1590,10 @@ void Stickers::featuredReceived(
 }
 
 void Stickers::gifsReceived(const QVector<MTPDocument> &items, uint64 hash) {
+	const auto keepLocal = keepLocalSavedGifs();
+	if (keepLocal && !_localSavedGifsLoaded) {
+		mergeLocalSavedGifs();
+	}
 	auto &saved = savedGifsRef();
 	saved.clear();
 
@@ -1426,6 +1607,9 @@ void Stickers::gifsReceived(const QVector<MTPDocument> &items, uint64 hash) {
 		}
 
 		saved.push_back(document);
+	}
+	if (keepLocal) {
+		mergeLocalSavedGifs();
 	}
 	const auto counted = Api::CountSavedGifsHash(&session());
 	if (counted != hash) {

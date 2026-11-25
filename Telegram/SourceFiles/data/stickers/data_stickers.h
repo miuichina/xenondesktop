@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "mtproto/sender.h"
+#include "data/data_msg_id.h"
 #include "data/stickers/data_stickers_set.h"
 #include "settings.h"
 
@@ -214,6 +215,15 @@ public:
 	[[nodiscard]] SavedGifs &savedGifsRef() {
 		return _savedGifs;
 	}
+	[[nodiscard]] bool keepLocalSavedGifs() const;
+	void setKeepLocalSavedGifs(bool enabled);
+	[[nodiscard]] const SavedGifs &displayedSavedGifs();
+	bool saveGifLocally(
+		not_null<DocumentData*> document,
+		FullMsgId source = {});
+	[[nodiscard]] bool removeSavedGif(not_null<DocumentData*> document);
+	[[nodiscard]] FullMsgId localGifSource(DocumentId id);
+
 	[[nodiscard]] const std::vector<GifCollection> &gifCollections();
 	[[nodiscard]] const GifCollection *gifCollection(uint32 id);
 	[[nodiscard]] rpl::producer<> gifCollectionsChanged() const;
@@ -320,6 +330,9 @@ private:
 		const MTPDmessages_featuredStickers &data,
 		StickersType type);
 
+	void readLocalSavedGifs();
+	void writeLocalSavedGifs();
+	void mergeLocalSavedGifs();
 	void readGifCollections();
 	void writeGifCollections();
 
@@ -349,6 +362,9 @@ private:
 	StickersSetsOrder _archivedSetsOrder;
 	StickersSetsOrder _archivedMaskSetsOrder;
 	SavedGifs _savedGifs;
+	SavedGifs _localSavedGifs;
+	base::flat_map<DocumentId, FullMsgId> _localGifSources;
+	bool _localSavedGifsLoaded = false;
 	std::vector<GifCollection> _gifCollections;
 	rpl::event_stream<> _gifCollectionsChanged;
 	uint32 _lastGifCollectionId = 0;
