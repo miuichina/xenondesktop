@@ -758,8 +758,8 @@ void Stickers::writeLocalSavedGifs() {
 void Stickers::mergeLocalSavedGifs() {
 	readLocalSavedGifs();
 	auto known = base::flat_set<DocumentData*>(
-		begin(_localSavedGifs),
-		end(_localSavedGifs));
+		_localSavedGifs.cbegin(),
+		_localSavedGifs.cend());
 	auto additions = SavedGifs();
 	for (const auto gif : _savedGifs) {
 		if (gif->hasRemoteLocation()
