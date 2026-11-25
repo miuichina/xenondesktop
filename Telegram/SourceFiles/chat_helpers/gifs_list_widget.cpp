@@ -751,7 +751,7 @@ void GifsListWidget::switchToSavedGifs() {
 int GifsListWidget::refreshInlineRows(const InlineCacheEntry *entry, bool resultsDeleted) {
 	if (!entry) {
 		if (resultsDeleted) {
-			clearInlineRows(true);
+			clearInlineRows(_section == Section::Inlines);
 			deleteUnusedInlineLayouts();
 		}
 		switchToSavedGifs();
@@ -827,19 +827,23 @@ void GifsListWidget::inlineItemRepaint(
 
 bool GifsListWidget::inlineItemVisible(
 		const InlineBots::Layout::ItemBase *layout) {
-	auto position = layout->position();
+	const auto position = layout->position();
 	if (position < 0 || !isVisible()) {
 		return false;
 	}
 
 	const auto &[row, column] = Layout::IndexToPosition(position);
+	if (_mosaic.maybeItemAt(row, column) != layout) {
+		return false;
+	}
+
 	auto top = 0;
 	for (auto i = 0; i != row; ++i) {
 		top += _mosaic.rowHeightAt(i);
 	}
 
 	return (top < getVisibleBottom())
-		&& (top + _mosaic.itemAt(row, column)->height() > getVisibleTop());
+		&& (top + layout->height() > getVisibleTop());
 }
 
 Data::FileOrigin GifsListWidget::inlineItemFileOrigin() {
