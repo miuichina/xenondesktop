@@ -48,7 +48,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "history/view/history_view_quick_action.h"
 #include "history/view/history_view_message_shot.h"
-#include "data/stickers/data_stickers.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "window/themes/window_theme.h"
@@ -1471,20 +1470,6 @@ void SetupStickersEmoji(
 			{ .radius = st::boxRadius },
 		} });
 	}
-
-	const auto stickers = &session->data().stickers();
-	const auto localGifs = AddButtonWithIcon(
-		container,
-		tr::lng_settings_local_saved_gifs(),
-		st::settingsButtonNoIcon);
-	localGifs->toggleOn(rpl::single(stickers->keepLocalSavedGifs())
-		| rpl::then(stickers->savedGifsUpdated() | rpl::map([=] {
-			return stickers->keepLocalSavedGifs();
-		}))
-	)->toggledValue() | rpl::skip(1) | rpl::on_next([=](bool enabled) {
-		stickers->setKeepLocalSavedGifs(enabled);
-	}, localGifs->lifetime());
-	Ui::AddDividerText(container, tr::lng_settings_local_saved_gifs_about());
 
 	const auto stickersButton = AddButtonWithIcon(
 		container,

@@ -10,12 +10,15 @@
 #include "core/xenon_updates.h"
 #include "data/components/sponsored_messages.h"
 #include "data/data_document.h"
+#include "data/data_session.h"
+#include "data/stickers/data_stickers.h"
 #include "dialogs/dialogs_entry.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_top_bar_blur.h"
 #include "history/view/history_view_top_bar_widget.h"
 #include "history/view/history_view_bottom_info.h"
 #include "lang/lang_keys.h"
+#include "main/main_session.h"
 #include "settings/sections/settings_main.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common_session.h"
@@ -195,6 +198,24 @@ const auto kMeta = BuildHelper({
 		return { .widget = std::move(controls.widget) };
 	});
 	builder.addDivider();
+	const auto stickers = &builder.session()->data().stickers();
+	const auto localGifs = builder.addButton({
+		.id = u"xenon/local_saved_gifs"_q,
+		.title = tr::lng_settings_local_saved_gifs(),
+		.toggled = rpl::single(stickers->keepLocalSavedGifs())
+			| rpl::then(stickers->savedGifsUpdated() | rpl::map([=] {
+				return stickers->keepLocalSavedGifs();
+			})),
+		.keywords = { u"gif"_q, u"local"_q, u"limit"_q },
+	});
+	if (localGifs) {
+		localGifs->toggledChanges() | rpl::on_next([=](bool enabled) {
+			stickers->setKeepLocalSavedGifs(enabled);
+		}, localGifs->lifetime());
+	}
+	builder.addDividerText(tr::lng_settings_local_saved_gifs_about());
+	builder.addDivider();
+
 	auto &showFps = base::options::lookup<bool>(Window::kOptionShowFps);
 	const auto fps = builder.addButton({
 		.id = u"xenon/show_fps"_q,
