@@ -619,7 +619,7 @@ void ShotBox::chooseTheme() {
 			tr::lng_message_shot_theme_default(),
 			st::settingsButtonNoIcon
 		)->addClickHandler([=] {
-			choose(-1, {}, {});
+			choose(-1, QColor(), Data::CloudTheme());
 			box->closeBox();
 		});
 		for (auto &theme : EmbeddedThemes()) {
@@ -630,7 +630,7 @@ void ShotBox::chooseTheme() {
 				std::move(theme.name),
 				st::settingsButtonNoIcon
 			)->addClickHandler([=] {
-				choose(type, color, {});
+				choose(type, color, Data::CloudTheme());
 				box->closeBox();
 			});
 		}
@@ -645,7 +645,7 @@ void ShotBox::chooseTheme() {
 					box,
 					tr::lng_message_shot_theme_accent(tr::now));
 				if (color.isValid()) {
-					choose(embedded, color, {});
+					choose(embedded, color, Data::CloudTheme());
 					box->closeBox();
 				}
 			});
@@ -662,7 +662,7 @@ void ShotBox::chooseTheme() {
 					rpl::single(theme.title),
 					st::settingsButtonNoIcon
 				)->addClickHandler([=] {
-					choose(-1, {}, theme);
+					choose(-1, QColor(), theme);
 					box->closeBox();
 				});
 			}
