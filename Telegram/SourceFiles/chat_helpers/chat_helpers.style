@@ -564,6 +564,7 @@ defaultTabbedSearchBack: IconButton(defaultIconButton) {
 	iconPosition: point(7px, -1px);
 	ripple: emptyRippleAnimation;
 }
+tabbedSearchHeight: 33px;
 defaultTabbedSearch: TabbedSearch {
 	outer: emojiPanBg;
 	bg: emojiPanHover;
@@ -579,7 +580,7 @@ defaultTabbedSearch: TabbedSearch {
 	defaultFieldWidth: 103px;
 	groupWidth: 30px;
 	groupSkip: 2px;
-	height: 33px;
+	height: tabbedSearchHeight;
 }
 
 inlineResultsMinHeight: 278px;
@@ -889,6 +890,26 @@ inlineBotsScroll: ScrollArea(defaultSolidScroll) {
 }
 
 gifsPadding: margins(9px, 5px, 3px, 9px);
+gifCollectionButtonSkip: 4px;
+gifCollectionButtonMaxWidth: 170px;
+gifCollectionButton: RoundButton(defaultLightButton) {
+	width: -24px;
+	height: tabbedSearchHeight;
+	textBg: emojiPanHover;
+	textBgOver: windowBgOver;
+	textFg: emojiSubIconFgActive;
+	textFgOver: emojiSubIconFgActive;
+	textTop: 8px;
+}
+gifCollectionButtonActive: RoundButton(gifCollectionButton) {
+	textBg: activeButtonBg;
+	textBgOver: activeButtonBgOver;
+	textFg: activeButtonFg;
+	textFgOver: activeButtonFgOver;
+}
+gifCollectionScroll: ScrollArea(defaultScrollArea) {
+	width: 0px;
+}
 
 emojiSuggestionsDropdown: InnerDropdown(defaultInnerDropdown) {
 	scrollMargin: margins(0px, emojiColorsPadding, 0px, emojiColorsPadding);

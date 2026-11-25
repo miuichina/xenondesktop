@@ -39,6 +39,12 @@ enum class StickersType : uchar {
 [[nodiscard]] StickerType ThumbnailTypeFromPhotoSize(
 	const MTPPhotoSize &size);
 
+struct GifCollection {
+	uint32 id = 0;
+	QString name;
+	std::vector<not_null<DocumentData*>> gifs;
+};
+
 class Stickers final {
 public:
 	explicit Stickers(not_null<Session*> owner);
@@ -208,6 +214,14 @@ public:
 	[[nodiscard]] SavedGifs &savedGifsRef() {
 		return _savedGifs;
 	}
+	[[nodiscard]] const std::vector<GifCollection> &gifCollections();
+	[[nodiscard]] const GifCollection *gifCollection(uint32 id);
+	[[nodiscard]] rpl::producer<> gifCollectionsChanged() const;
+	void createGifCollection(QString name, not_null<DocumentData*> gif);
+	void renameGifCollection(uint32 id, QString name);
+	void deleteGifCollection(uint32 id);
+	void toggleGifCollectionItem(uint32 id, not_null<DocumentData*> gif);
+
 	void removeFromRecentSet(not_null<DocumentData*> document);
 
 	void addSavedGif(
@@ -303,6 +317,9 @@ private:
 		const MTPDmessages_featuredStickers &data,
 		StickersType type);
 
+	void readGifCollections();
+	void writeGifCollections();
+
 	const not_null<Session*> _owner;
 	rpl::event_stream<StickersType> _updated;
 	rpl::event_stream<StickersType> _recentUpdated;
@@ -329,6 +346,10 @@ private:
 	StickersSetsOrder _archivedSetsOrder;
 	StickersSetsOrder _archivedMaskSetsOrder;
 	SavedGifs _savedGifs;
+	std::vector<GifCollection> _gifCollections;
+	rpl::event_stream<> _gifCollectionsChanged;
+	uint32 _lastGifCollectionId = 0;
+	bool _gifCollectionsLoaded = false;
 
 };
 

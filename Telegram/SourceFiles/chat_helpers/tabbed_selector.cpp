@@ -1092,11 +1092,13 @@ bool TabbedSelector::preventAutoHide() const {
 	return (hasStickersTab() && stickers()->preventAutoHide())
 		|| (hasMasksTab() && masks()->preventAutoHide())
 		|| (hasEmojiTab() && emoji()->preventAutoHide())
+		|| (hasGifsTab() && gifs()->preventAutoHide())
 		|| hasMenu();
 }
 
 bool TabbedSelector::hasMenu() const {
-	return (_menu && !_menu->empty());
+	return (_menu && !_menu->empty())
+		|| (hasGifsTab() && gifs()->hasCollectionMenu());
 }
 
 QImage TabbedSelector::grabForAnimation() {

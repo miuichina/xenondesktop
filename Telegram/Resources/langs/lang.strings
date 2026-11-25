@@ -4897,6 +4897,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_emoji_featured_unlock" = "Unlock";
 "lng_emoji_premium_restore" = "Restore";
 "lng_gifs_no_saved" = "You have no saved GIFs yet.";
+"lng_gif_collections_all" = "All GIFs";
+"lng_gif_collections_add" = "Add to collection";
+"lng_gif_collections_create" = "Create new collection";
+"lng_gif_collections_rename" = "Rename collection";
+"lng_gif_collections_delete" = "Delete collection";
+"lng_gif_collections_confirm_delete" = "Delete the collection “{title}”?";
+"lng_gif_collections_name" = "Collection name";
+"lng_gif_collections_empty" = "This collection is empty.";
 
 "lng_inline_bot_no_results" = "No results.";
 "lng_inline_bot_via" = "via {inline_bot}";

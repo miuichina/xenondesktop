@@ -22,6 +22,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_components.h"
 #include "apiwrap.h"
 #include "storage/storage_account.h"
+#include "storage/serialize_document.h"
+#include "core/version.h"
+
+#include <QtCore/QDataStream>
+#include <QtCore/QIODevice>
 #include "settings/sections/settings_premium.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -42,6 +47,7 @@ namespace {
 
 constexpr auto kPremiumToastDuration = 5 * crl::time(1000);
 constexpr auto kSlice = 65536;
+constexpr auto kGifCollectionsPref = std::string_view("gifCollections");
 
 using SetFlag = StickersSetFlag;
 
@@ -404,6 +410,127 @@ void Stickers::incrementSticker(not_null<DocumentData*> document) {
 		session().local().writeRecentStickers();
 	}
 	notifyRecentUpdated(StickersType::Stickers);
+}
+
+const std::vector<GifCollection> &Stickers::gifCollections() {
+	if (!_gifCollectionsLoaded) {
+		readGifCollections();
+	}
+	return _gifCollections;
+}
+
+const GifCollection *Stickers::gifCollection(uint32 id) {
+	const auto &list = gifCollections();
+	const auto i = ranges::find(list, id, &GifCollection::id);
+	return (i == end(list)) ? nullptr : &*i;
+}
+
+rpl::producer<> Stickers::gifCollectionsChanged() const {
+	return _gifCollectionsChanged.events();
+}
+
+void Stickers::createGifCollection(QString name, not_null<DocumentData*> gif) {
+	if (!_gifCollectionsLoaded) {
+		readGifCollections();
+	}
+	_gifCollections.push_back({
+		.id = ++_lastGifCollectionId,
+		.name = std::move(name),
+		.gifs = { gif },
+	});
+	writeGifCollections();
+}
+
+void Stickers::renameGifCollection(uint32 id, QString name) {
+	const auto i = ranges::find(_gifCollections, id, &GifCollection::id);
+	if (i != end(_gifCollections) && i->name != name) {
+		i->name = std::move(name);
+		writeGifCollections();
+	}
+}
+
+void Stickers::deleteGifCollection(uint32 id) {
+	if (std::erase_if(_gifCollections, [=](const GifCollection &collection) {
+		return collection.id == id;
+	})) {
+		writeGifCollections();
+	}
+}
+
+void Stickers::toggleGifCollectionItem(uint32 id, not_null<DocumentData*> gif) {
+	const auto i = ranges::find(_gifCollections, id, &GifCollection::id);
+	if (i == end(_gifCollections)) {
+		return;
+	}
+	if (!std::erase(i->gifs, gif)) {
+		i->gifs.insert(begin(i->gifs), gif);
+	}
+	writeGifCollections();
+}
+
+void Stickers::readGifCollections() {
+	_gifCollectionsLoaded = true;
+	const auto bytes = session().local().readPref<QByteArray>(
+		kGifCollectionsPref,
+		QByteArray());
+	if (bytes.isEmpty()) {
+		return;
+	}
+	auto stream = QDataStream(bytes);
+	stream.setVersion(QDataStream::Qt_5_1);
+	auto appVersion = qint32();
+	auto count = quint32();
+	stream >> appVersion >> count;
+	auto list = std::vector<GifCollection>();
+	auto lastId = uint32();
+	for (auto index = quint32(); index < count; ++index) {
+		auto id = quint32();
+		auto name = QString();
+		auto gifCount = quint32();
+		stream >> id >> name >> gifCount;
+		if (stream.status() != QDataStream::Ok || id <= lastId) {
+			return;
+		}
+		lastId = id;
+		auto collection = GifCollection{ .id = id, .name = std::move(name) };
+		for (auto j = quint32(); j < gifCount; ++j) {
+			const auto gif = Serialize::Document::readFromStream(
+				&session(),
+				appVersion,
+				stream);
+			if (stream.status() != QDataStream::Ok) {
+				return;
+			} else if (gif && gif->isGifv()) {
+				collection.gifs.push_back(gif);
+			}
+		}
+		list.push_back(std::move(collection));
+	}
+	_gifCollections = std::move(list);
+	_lastGifCollectionId = lastId;
+}
+
+void Stickers::writeGifCollections() {
+	if (_gifCollections.empty()) {
+		session().local().clearPref(kGifCollectionsPref);
+	} else {
+		auto bytes = QByteArray();
+		auto stream = QDataStream(&bytes, QIODevice::WriteOnly);
+		stream.setVersion(QDataStream::Qt_5_1);
+		stream << qint32(AppVersion) << quint32(_gifCollections.size());
+		for (const auto &collection : _gifCollections) {
+			stream << quint32(collection.id)
+				<< collection.name
+				<< quint32(collection.gifs.size());
+			for (const auto gif : collection.gifs) {
+				Serialize::Document::writeToStream(stream, gif);
+			}
+		}
+		session().local().writePref<QByteArray>(
+			kGifCollectionsPref,
+			std::move(bytes));
+	}
+	_gifCollectionsChanged.fire({});
 }
 
 void Stickers::addSavedGif(

@@ -23,11 +23,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_send.h" // SendMenu::FillSendMenu
 #include "mtproto/mtproto_config.h"
 #include "core/click_handler_types.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/controls/tabbed_search.h"
 #include "ui/layers/generic_box.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/scroll_area.h"
+#include "ui/text/text_utilities.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/image/image.h"
 #include "ui/painter.h"
@@ -44,6 +47,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_account.h" // Account::writeSavedGifs
 #include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_boxes.h"
+#include "styles/style_layers.h"
+#include "styles/style_media_player.h"
+#include "styles/style_widgets.h"
+
+#include <QtGui/QWheelEvent>
 
 #include <QtWidgets/QApplication>
 
@@ -53,6 +62,7 @@ namespace {
 constexpr auto kSearchRequestDelay = 400;
 constexpr auto kMinRepaintDelay = crl::time(33);
 constexpr auto kMinAfterScrollDelay = crl::time(33);
+constexpr auto kGifCollectionNameLimit = 64;
 
 } // namespace
 
@@ -149,9 +159,8 @@ GifsListWidget::GifsListWidget(
 		_mosaic.setFullWidth(s.width());
 	}, lifetime());
 
-	_mosaic.setPadding(st::gifsPadding
-		+ QMargins(-st::emojiPanRadius, _search->height(), 0, 0));
 	_mosaic.setRightSkip(st::inlineResultsSkip);
+	setupCollections();
 }
 
 rpl::producer<FileChosen> GifsListWidget::fileChosen() const {
@@ -190,9 +199,9 @@ object_ptr<TabbedSelector::InnerFooter> GifsListWidget::createFooter() {
 
 	_footer->setChosen(
 	) | rpl::on_next([=](uint64 setId) {
-		if (_search) {
-			_search->cancel();
-		}
+		_search->cancel();
+		_collectionId = 0;
+		refreshCollectionButtons();
 		_chosenSetId = setId;
 		refreshIcons();
 		const auto i = ranges::find(_sections, setId, [](GifSection value) {
@@ -358,7 +367,9 @@ void GifsListWidget::paintInlineItems(Painter &p, QRect clip) {
 	if (_mosaic.empty()) {
 		p.setFont(st::normalFont);
 		p.setPen(st::noContactsColor);
-		auto text = _inlineQuery.isEmpty()
+		const auto text = _collectionId
+			? tr::lng_gif_collections_empty(tr::now)
+			: _inlineQuery.isEmpty()
 			? tr::lng_gifs_no_saved(tr::now)
 			: tr::lng_inline_bot_no_results(tr::now);
 		p.drawText(QRect(0, 0, width(), (height() / 3) * 2 + st::normalFont->height), text, style::al_center);
@@ -444,6 +455,9 @@ base::unique_qptr<Ui::PopupMenu> GifsListWidget::fillContextMenu(
 				menu->addAction(text, std::move(done), icon);
 			};
 			AddGifAction(std::move(callback), _show, document, icons);
+			if (document->isGifv() && document->hasRemoteLocation()) {
+				addCollectionMenu(menu.get(), document);
+			}
 		}
 	}
 
@@ -617,17 +631,23 @@ void GifsListWidget::refreshSavedGifs() {
 	if (_section == Section::Gifs) {
 		clearInlineRows(false);
 
-		const auto &saved = session().data().stickers().savedGifs();
-		if (!saved.isEmpty()) {
-			const auto layouts = ranges::views::all(
-				saved
-			) | ranges::views::transform([&](not_null<DocumentData*> gif) {
-				return layoutPrepareSavedGif(gif);
-			}) | ranges::views::filter([](const LayoutItem *item) {
-				return item != nullptr;
-			}) | ranges::to<std::vector<not_null<LayoutItem*>>>;
-
+		auto &stickers = session().data().stickers();
+		const auto addGifs = [&](const auto &gifs) {
+			if (gifs.empty()) {
+				return;
+			}
+			const auto layouts = gifs
+				| ranges::views::transform([&](not_null<DocumentData*> gif) {
+					return layoutPrepareSavedGif(gif);
+				}) | ranges::views::filter([](const LayoutItem *item) {
+					return item != nullptr;
+				}) | ranges::to<std::vector<not_null<LayoutItem*>>>;
 			_mosaic.addItems(layouts);
+		};
+		if (const auto collection = stickers.gifCollection(_collectionId)) {
+			addGifs(collection->gifs);
+		} else {
+			addGifs(stickers.savedGifs());
 		}
 		deleteUnusedGifLayouts();
 
@@ -860,12 +880,223 @@ void GifsListWidget::setupSearch() {
 				QString b) {
 			return a.isEmpty() ? b : (a + ' ' + b);
 		});
+		if (!accumulated.isEmpty() && _collectionId) {
+			_collectionId = 0;
+			refreshCollectionButtons();
+		}
 		_chosenSetId = accumulated.isEmpty()
 			? Data::Stickers::RecentSetId
 			: SearchEmojiSectionSetId();
 		refreshIcons();
 		searchForGifs(accumulated);
 	}, session, TabbedSearchType::Emoji);
+}
+
+void GifsListWidget::setupCollections() {
+	const auto bar = _collectionBar = Ui::CreateChild<Ui::ScrollArea>(
+		this,
+		st::gifCollectionScroll);
+	bar->setCustomWheelProcess([=](not_null<QWheelEvent*> e) {
+		const auto pixel = e->pixelDelta();
+		const auto angle = e->angleDelta();
+		if (pixel.x() || angle.x() || !bar->scrollLeftMax()) {
+			return false;
+		}
+		bar->scrollToX(bar->scrollLeft() - (pixel.y() ? pixel.y() : angle.y()));
+		return true;
+	});
+	widthValue() | rpl::on_next([=](int width) {
+		const auto &margin = st().searchMargin;
+		bar->setGeometry(
+			margin.left(),
+			_search->height() + margin.top(),
+			std::max(width - margin.left() - margin.right(), 0),
+			st().search.height);
+	}, lifetime());
+
+	session().data().stickers().gifCollectionsChanged(
+	) | rpl::on_next([=] {
+		if (_collectionId
+			&& !session().data().stickers().gifCollection(_collectionId)) {
+			selectCollection(0);
+			return;
+		}
+		refreshCollectionButtons();
+		if (_section == Section::Gifs) {
+			refreshSavedGifs();
+		} else {
+			resizeToWidth(width());
+			update();
+		}
+	}, lifetime());
+	refreshCollectionButtons();
+}
+
+void GifsListWidget::refreshCollectionButtons() {
+	const auto &collections = session().data().stickers().gifCollections();
+	const auto height = _search->height();
+	_mosaic.setPadding(st::gifsPadding + QMargins(
+		-st::emojiPanRadius,
+		height * (collections.empty() ? 1 : 2),
+		0,
+		0));
+	_collectionBar->setVisible(!collections.empty());
+	if (collections.empty()) {
+		return;
+	}
+
+	const auto left = _collectionBar->scrollLeft();
+	auto row = object_ptr<Ui::RpWidget>(_collectionBar);
+	auto x = 0;
+	const auto add = [&](uint32 id, QString name) {
+		const auto button = Ui::CreateChild<Ui::RoundButton>(
+			row.data(),
+			rpl::single(std::move(name)),
+			(id == _collectionId)
+				? st::gifCollectionButtonActive
+				: st::gifCollectionButton);
+		button->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+		button->setFullWidth(std::min(
+			button->width(),
+			st::gifCollectionButtonMaxWidth));
+		button->setFullRadius(true);
+		button->setClickedCallback([=] {
+			InvokeQueued(this, [=] {
+				if (!id || session().data().stickers().gifCollection(id)) {
+					selectCollection(id);
+				}
+			});
+		});
+		if (id) {
+			button->setContextMenuPolicy(Qt::CustomContextMenu);
+			connect(
+				button,
+				&QWidget::customContextMenuRequested,
+				this,
+				[=](QPoint position) {
+					showCollectionMenu(id, button->mapToGlobal(position));
+				});
+		}
+		button->move(x, 0);
+		x += button->width() + st::gifCollectionButtonSkip;
+		button->show();
+	};
+	add(0, tr::lng_gif_collections_all(tr::now));
+	for (const auto &collection : collections) {
+		add(collection.id, collection.name);
+	}
+	row->resize(x - st::gifCollectionButtonSkip, st().search.height);
+	_collectionBar->setOwnedWidget(std::move(row));
+	_collectionBar->scrollToX(left);
+}
+
+void GifsListWidget::selectCollection(uint32 id) {
+	_search->cancel();
+	_collectionId = id;
+	_chosenSetId = Data::Stickers::RecentSetId;
+	refreshIcons();
+	refreshCollectionButtons();
+	cancelGifsSearch();
+	scrollTo(0);
+}
+
+bool GifsListWidget::hasCollectionMenu() const {
+	return _collectionMenu && _collectionMenu->isVisible();
+}
+
+void GifsListWidget::showCollectionMenu(uint32 id, QPoint position) {
+	const auto collection = session().data().stickers().gifCollection(id);
+	if (!collection) {
+		return;
+	}
+	_collectionMenu = base::make_unique_q<Ui::PopupMenu>(this, st().menu);
+	_collectionMenu->addAction(
+		tr::lng_gif_collections_rename(tr::now),
+		[=] { editCollection(id); },
+		&st::menuIconEdit);
+	_collectionMenu->addAction(
+		tr::lng_gif_collections_delete(tr::now),
+		[=, name = collection->name] {
+			showBoxPreventHide(Ui::MakeConfirmBox({
+				.text = tr::lng_gif_collections_confirm_delete(
+					lt_title,
+					rpl::single(name)),
+				.confirmed = crl::guard(this, [=](Fn<void()> &&close) {
+					session().data().stickers().deleteGifCollection(id);
+					close();
+				}),
+				.confirmText = tr::lng_box_delete(),
+				.confirmStyle = &st::attentionBoxButton,
+			}));
+		},
+		&st::menuIconDeleteAttention);
+	_collectionMenu->popup(position);
+}
+
+void GifsListWidget::editCollection(uint32 id, DocumentData *gif) {
+	const auto collection = session().data().stickers().gifCollection(id);
+	if (id && !collection) {
+		return;
+	}
+	showBoxPreventHide(Box([=, text = collection ? collection->name : QString()](
+			not_null<Ui::GenericBox*> box) {
+		box->setTitle(id
+			? tr::lng_gif_collections_rename()
+			: tr::lng_gif_collections_create());
+		const auto input = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::defaultInputField,
+			tr::lng_gif_collections_name(),
+			text));
+		input->setMaxLength(kGifCollectionNameLimit);
+		box->setFocusCallback([=] { input->setFocusFast(); });
+
+		const auto done = crl::guard(this, [=] {
+			auto name = input->getLastText().trimmed();
+			if (name.isEmpty()) {
+				input->showError();
+				return;
+			}
+			auto &stickers = session().data().stickers();
+			if (id) {
+				stickers.renameGifCollection(id, std::move(name));
+			} else {
+				stickers.createGifCollection(std::move(name), gif);
+			}
+			box->closeBox();
+		});
+		box->addButton(
+			id ? tr::lng_settings_save() : tr::lng_filters_create_button(),
+			done);
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+		input->submits() | rpl::on_next([=] { done(); }, input->lifetime());
+	}));
+}
+
+void GifsListWidget::addCollectionMenu(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<DocumentData*> gif) {
+	const auto action = menu->addAction(
+		tr::lng_gif_collections_add(tr::now),
+		Fn<void()>(),
+		&st::menuIconAddToFolder);
+	const auto submenu = menu->ensureSubmenu(action, st::foldersMenu);
+	for (const auto &collection : session().data().stickers().gifCollections()) {
+		const auto id = collection.id;
+		const auto contains = ranges::contains(collection.gifs, gif);
+		const auto check = contains ? &st::mediaPlayerMenuCheck : nullptr;
+		submenu->addAction(
+			Ui::Text::FixAmpersandInAction(collection.name),
+			crl::guard(this, [=] {
+				session().data().stickers().toggleGifCollectionItem(id, gif);
+			}),
+			check,
+			check);
+	}
+	submenu->addAction(
+		tr::lng_gif_collections_create(tr::now),
+		crl::guard(this, [=] { editCollection(0, gif); }),
+		&st::menuIconShowInFolder);
 }
 
 int32 GifsListWidget::showInlineRows(bool newResults) {

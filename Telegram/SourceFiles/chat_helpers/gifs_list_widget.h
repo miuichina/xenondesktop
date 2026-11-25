@@ -32,6 +32,7 @@ class Result;
 namespace Ui {
 class PopupMenu;
 class RoundButton;
+class ScrollArea;
 class TabbedSearch;
 } // namespace Ui
 
@@ -100,6 +101,8 @@ public:
 	void searchForGifs(const QString &query);
 	void sendInlineRequest();
 
+	[[nodiscard]] bool hasCollectionMenu() const;
+
 	void cancelled();
 	rpl::producer<> cancelRequests() const;
 
@@ -142,6 +145,14 @@ private:
 	};
 
 	void setupSearch();
+	void setupCollections();
+	void refreshCollectionButtons();
+	void selectCollection(uint32 id);
+	void showCollectionMenu(uint32 id, QPoint position);
+	void editCollection(uint32 id, DocumentData *gif = nullptr);
+	void addCollectionMenu(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<DocumentData*> gif);
 	void clearHeavyData();
 	void cancelGifsSearch();
 	void switchToSavedGifs();
@@ -181,6 +192,9 @@ private:
 	const std::shared_ptr<Show> _show;
 	const bool _chooseBeforeLoad;
 	std::unique_ptr<Ui::TabbedSearch> _search;
+	Ui::ScrollArea *_collectionBar = nullptr;
+	base::unique_qptr<Ui::PopupMenu> _collectionMenu;
+	uint32 _collectionId = 0;
 
 	MTP::Sender _api;
 
