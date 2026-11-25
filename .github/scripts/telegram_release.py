@@ -4,6 +4,7 @@ import html
 import json
 import os
 import subprocess
+from time import sleep
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -94,19 +95,29 @@ def send_message(token, chat_id, message, buttons=None):
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    try:
-        with urlopen(request, timeout=30) as response:
-            result = json.load(response)
-    except HTTPError as error:
-        print(f"Telegram announcement skipped: HTTP {error.code}.")
-        return False
-    except (URLError, TimeoutError, OSError, ValueError):
-        print("Telegram announcement stopped: delivery could not be confirmed.")
-        return False
-    if result.get("ok") is not True:
-        print("Telegram announcement skipped: API rejected the message.")
-        return False
-    return True
+    for attempt in range(2):
+        try:
+            with urlopen(request, timeout=30) as response:
+                result = json.load(response)
+        except HTTPError as error:
+            with error:
+                if error.code == 429 and attempt == 0:
+                    try:
+                        retry_after = json.load(error)["parameters"]["retry_after"]
+                    except (KeyError, TypeError, ValueError, OSError):
+                        retry_after = 0
+                    if type(retry_after) is int and 0 < retry_after <= 60:
+                        sleep(retry_after)
+                        continue
+            print(f"Telegram announcement skipped: HTTP {error.code}.")
+            return False
+        except (URLError, TimeoutError, OSError, ValueError):
+            print("Telegram announcement stopped: delivery could not be confirmed.")
+            return False
+        if result.get("ok") is not True:
+            print("Telegram announcement skipped: API rejected the message.")
+            return False
+        return True
 
 
 def main():
@@ -126,10 +137,12 @@ def main():
     assets = {item["name"]: item for item in release["assets"]}
     buttons = download_buttons(assets)
     messages = build_messages(git("rev-parse", "--short=7", current), release_commits(previous, current))
-    for index, message in enumerate(messages):
-        if not send_message(token, chat_id, message, buttons if index == len(messages) - 1 else None):
+    for message in messages[:-1]:
+        if not send_message(token, chat_id, message):
             return
-    print("Telegram announcement sent.")
+        sleep(1)
+    if send_message(token, chat_id, messages[-1], buttons):
+        print("Telegram announcement sent.")
 
 
 if __name__ == "__main__":
