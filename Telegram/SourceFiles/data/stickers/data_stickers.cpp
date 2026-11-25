@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_stickers.h"
 
 #include "api/api_hash.h"
+#include "base/algorithm.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "data/data_document.h"
 #include "data/data_session.h"
@@ -457,6 +458,18 @@ void Stickers::deleteGifCollection(uint32 id) {
 	}
 }
 
+void Stickers::moveGifCollection(uint32 id, uint32 targetId) {
+	const auto from = ranges::find(_gifCollections, id, &GifCollection::id);
+	const auto to = ranges::find(_gifCollections, targetId, &GifCollection::id);
+	if (from != end(_gifCollections) && to != end(_gifCollections) && from != to) {
+		base::reorder(
+			_gifCollections,
+			int(from - begin(_gifCollections)),
+			int(to - begin(_gifCollections)));
+		writeGifCollections();
+	}
+}
+
 void Stickers::toggleGifCollectionItem(uint32 id, not_null<DocumentData*> gif) {
 	const auto i = ranges::find(_gifCollections, id, &GifCollection::id);
 	if (i == end(_gifCollections)) {
@@ -506,6 +519,25 @@ void Stickers::readGifCollections() {
 		}
 		list.push_back(std::move(collection));
 	}
+	const auto orderSize = qint64(count) * qint64(sizeof(quint32));
+	if (count && stream.device()->bytesAvailable() >= orderSize) {
+		auto positions = base::flat_map<uint32, int>();
+		positions.reserve(list.size());
+		for (auto index = quint32(); index < count; ++index) {
+			auto id = quint32();
+			stream >> id;
+			positions.emplace(id, int(index));
+		}
+		if (stream.status() == QDataStream::Ok
+			&& positions.size() == list.size()
+			&& ranges::all_of(list, [&](const GifCollection &collection) {
+				return positions.contains(collection.id);
+			})) {
+			ranges::sort(list, {}, [&](const GifCollection &collection) {
+				return positions.find(collection.id)->second;
+			});
+		}
+	}
 	_gifCollections = std::move(list);
 	_lastGifCollectionId = lastId;
 }
@@ -518,13 +550,23 @@ void Stickers::writeGifCollections() {
 		auto stream = QDataStream(&bytes, QIODevice::WriteOnly);
 		stream.setVersion(QDataStream::Qt_5_1);
 		stream << qint32(AppVersion) << quint32(_gifCollections.size());
+		// Keep the ID-sorted records readable by older clients.
+		auto byId = std::vector<const GifCollection*>();
+		byId.reserve(_gifCollections.size());
 		for (const auto &collection : _gifCollections) {
-			stream << quint32(collection.id)
-				<< collection.name
-				<< quint32(collection.gifs.size());
-			for (const auto gif : collection.gifs) {
+			byId.push_back(&collection);
+		}
+		ranges::sort(byId, {}, &GifCollection::id);
+		for (const auto collection : byId) {
+			stream << quint32(collection->id)
+				<< collection->name
+				<< quint32(collection->gifs.size());
+			for (const auto gif : collection->gifs) {
 				Serialize::Document::writeToStream(stream, gif);
 			}
+		}
+		for (const auto &collection : _gifCollections) {
+			stream << quint32(collection.id);
 		}
 		session().local().writePref<QByteArray>(
 			kGifCollectionsPref,

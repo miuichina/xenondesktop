@@ -52,6 +52,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_media_player.h"
 #include "styles/style_widgets.h"
 
+#include <QtGui/QMouseEvent>
 #include <QtGui/QWheelEvent>
 
 #include <QtWidgets/QApplication>
@@ -63,6 +64,183 @@ constexpr auto kSearchRequestDelay = 400;
 constexpr auto kMinRepaintDelay = crl::time(33);
 constexpr auto kMinAfterScrollDelay = crl::time(33);
 constexpr auto kGifCollectionNameLimit = 64;
+constexpr auto kCollectionScrollInterval = 16;
+
+class GifCollectionRow final : public Ui::RpWidget {
+public:
+	GifCollectionRow(
+		not_null<Ui::ScrollArea*> bar,
+		Fn<void(uint32, uint32)> moved)
+	: RpWidget(bar)
+	, _bar(bar)
+	, _moved(std::move(moved))
+	, _scrollTimer([=] { scrollDuringDrag(); }) {
+	}
+
+	void addButton(uint32 id, not_null<Ui::RoundButton*> button) {
+		const auto left = _buttons.empty()
+			? 0
+			: (_buttons.back().left
+				+ _buttons.back().button->width()
+				+ st::gifCollectionButtonSkip);
+		_buttons.push_back({ button, id, left });
+		button->move(left, 0);
+		button->show();
+		if (id) {
+			button->installEventFilter(this);
+		}
+		resize(left + button->width(), button->height());
+	}
+
+protected:
+	bool eventFilter(QObject *object, QEvent *event) override;
+
+private:
+	struct Entry {
+		not_null<Ui::RoundButton*> button;
+		uint32 id = 0;
+		int left = 0;
+	};
+
+	void updateDrag();
+	void finishDrag(bool apply);
+	void scrollDuringDrag();
+
+	const not_null<Ui::ScrollArea*> _bar;
+	Fn<void(uint32, uint32)> _moved;
+	std::vector<Entry> _buttons;
+	base::Timer _scrollTimer;
+	QPoint _pointer;
+	int _pressX = 0;
+	int _grabOffset = 0;
+	int _source = -1;
+	int _target = -1;
+	bool _dragging = false;
+
+};
+
+bool GifCollectionRow::eventFilter(QObject *object, QEvent *event) {
+	if (event->type() == QEvent::MouseButtonPress) {
+		const auto mouse = static_cast<QMouseEvent*>(event);
+		if (mouse->button() == Qt::LeftButton && _buttons.size() > 2) {
+			const auto i = ranges::find(_buttons, object, [](const Entry &e) {
+				return static_cast<QObject*>(e.button.get());
+			});
+			if (i != end(_buttons)) {
+				_source = _target = int(i - begin(_buttons));
+				_pressX = mouse->globalPosition().toPoint().x();
+				_grabOffset = mouse->position().toPoint().x();
+			}
+		}
+	} else if (_source >= 0 && object == _buttons[_source].button.get()) {
+		if (event->type() == QEvent::MouseMove) {
+			const auto mouse = static_cast<QMouseEvent*>(event);
+			if (!(mouse->buttons() & Qt::LeftButton)) {
+				finishDrag(false);
+				return false;
+			}
+			_pointer = mouse->globalPosition().toPoint();
+			if (!_dragging && std::abs(_pointer.x() - _pressX)
+				>= QApplication::startDragDistance()) {
+				_dragging = true;
+				_buttons[_source].button->setSynteticOver(false);
+				_buttons[_source].button->clearState();
+				_buttons[_source].button->raise();
+				_buttons.front().button->raise();
+				if (_bar->scrollLeftMax()) {
+					_scrollTimer.callEach(kCollectionScrollInterval);
+				}
+			}
+			if (_dragging) {
+				updateDrag();
+				return true;
+			}
+		} else if (event->type() == QEvent::MouseButtonRelease) {
+			const auto mouse = static_cast<QMouseEvent*>(event);
+			if (mouse->button() == Qt::LeftButton) {
+				const auto dragged = _dragging;
+				if (dragged) {
+					_pointer = mouse->globalPosition().toPoint();
+					updateDrag();
+				}
+				finishDrag(dragged);
+				return dragged;
+			}
+		} else if (event->type() == QEvent::UngrabMouse
+			|| event->type() == QEvent::Hide) {
+			finishDrag(false);
+		}
+	}
+	return false;
+}
+
+void GifCollectionRow::updateDrag() {
+	const auto &dragged = _buttons[_source];
+	const auto buttonWidth = dragged.button->width();
+	const auto pointerX = mapFromGlobal(_pointer).x();
+	const auto left = std::clamp(
+		pointerX - _grabOffset,
+		_buttons[1].left,
+		width() - buttonWidth);
+	const auto midpoint = [](const Entry &entry) {
+		return entry.left + entry.button->width() / 2;
+	};
+	const auto count = int(_buttons.size());
+	_target = _source;
+	while (_target > 1 && pointerX < midpoint(_buttons[_target - 1])) {
+		--_target;
+	}
+	while (_target + 1 < count && pointerX > midpoint(_buttons[_target + 1])) {
+		++_target;
+	}
+	const auto shift = buttonWidth + st::gifCollectionButtonSkip;
+	for (auto i = 1; i < count; ++i) {
+		const auto &entry = _buttons[i];
+		const auto x = (i == _source)
+			? left
+			: (i >= _target && i < _source)
+			? (entry.left + shift)
+			: (i > _source && i <= _target)
+			? (entry.left - shift)
+			: entry.left;
+		entry.button->move(x, 0);
+	}
+}
+
+void GifCollectionRow::finishDrag(bool apply) {
+	_scrollTimer.cancel();
+	if (_dragging) {
+		for (const auto &entry : _buttons) {
+			entry.button->move(entry.left, 0);
+		}
+	}
+	const auto from = std::exchange(_source, -1);
+	const auto to = std::exchange(_target, -1);
+	_dragging = false;
+	if (apply && from != to) {
+		_moved(_buttons[from].id, _buttons[to].id);
+	}
+}
+
+void GifCollectionRow::scrollDuringDrag() {
+	const auto viewport = _bar->viewport();
+	const auto x = viewport->mapFromGlobal(_pointer).x();
+	const auto edge = std::min(height(), viewport->width() / 3);
+	const auto delta = (x < edge)
+		? (x - edge)
+		: std::max(x - viewport->width() + edge, 0);
+	if (delta) {
+		const auto old = _bar->scrollLeft();
+		const auto direction = (_bar->layoutDirection() == Qt::RightToLeft)
+			? -1
+			: 1;
+		const auto speed = std::clamp(delta, -edge, edge) / 4;
+		_bar->scrollToX(old + direction * (speed + (delta > 0 ? 1 : -1)));
+		if (old != _bar->scrollLeft()) {
+			updateDrag();
+		}
+	}
+}
 
 } // namespace
 
@@ -950,8 +1128,13 @@ void GifsListWidget::refreshCollectionButtons() {
 	}
 
 	const auto left = _collectionBar->scrollLeft();
-	auto row = object_ptr<Ui::RpWidget>(_collectionBar);
-	auto x = 0;
+	auto row = object_ptr<GifCollectionRow>(
+		_collectionBar,
+		[=](uint32 id, uint32 targetId) {
+			InvokeQueued(this, [=] {
+				session().data().stickers().moveGifCollection(id, targetId);
+			});
+		});
 	const auto add = [&](uint32 id, QString name) {
 		const auto button = Ui::CreateChild<Ui::RoundButton>(
 			row.data(),
@@ -981,15 +1164,12 @@ void GifsListWidget::refreshCollectionButtons() {
 					showCollectionMenu(id, button->mapToGlobal(position));
 				});
 		}
-		button->move(x, 0);
-		x += button->width() + st::gifCollectionButtonSkip;
-		button->show();
+		row->addButton(id, button);
 	};
 	add(0, tr::lng_gif_collections_all(tr::now));
 	for (const auto &collection : collections) {
 		add(collection.id, collection.name);
 	}
-	row->resize(x - st::gifCollectionButtonSkip, st().search.height);
 	_collectionBar->setOwnedWidget(std::move(row));
 	_collectionBar->scrollToX(left);
 }

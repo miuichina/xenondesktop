@@ -220,6 +220,7 @@ public:
 	void createGifCollection(QString name, not_null<DocumentData*> gif);
 	void renameGifCollection(uint32 id, QString name);
 	void deleteGifCollection(uint32 id);
+	void moveGifCollection(uint32 id, uint32 targetId);
 	void toggleGifCollectionItem(uint32 id, not_null<DocumentData*> gif);
 
 	void removeFromRecentSet(not_null<DocumentData*> document);
