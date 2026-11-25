@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_reply.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
 #include "data/stickers/data_custom_emoji.h"
@@ -836,13 +838,16 @@ void Reply::paint(
 	y += st::historyReplyTop;
 	const auto rect = QRect(x, y, w, _height);
 	const auto selected = context.selected();
-	const auto backgroundEmojiId = _colorPeer
+	const auto plain = MessageShot::Hide(MessageShot::Part::ColorfulReplies);
+	const auto backgroundEmojiId = (_colorPeer && !plain)
 		? _colorPeer->backgroundEmojiId()
 		: DocumentId();
-	const auto colorIndexPlusOne = _colorPeer
+	const auto colorIndexPlusOne = plain
+		? 0
+		: _colorPeer
 		? (_colorPeer->colorIndex() + 1)
 		: _hiddenSenderColorIndexPlusOne;
-	const auto &colorCollectible = _colorPeer
+	const auto colorCollectible = (_colorPeer && !plain)
 		? _colorPeer->colorCollectible()
 		: nullptr;
 	const auto useColorCollectible = colorCollectible && !context.outbg;

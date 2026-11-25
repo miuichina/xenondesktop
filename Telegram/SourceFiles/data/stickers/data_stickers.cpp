@@ -49,6 +49,7 @@ namespace {
 constexpr auto kPremiumToastDuration = 5 * crl::time(1000);
 constexpr auto kSlice = 65536;
 constexpr auto kGifCollectionsPref = std::string_view("gifCollections");
+constexpr auto kDefaultGifCollectionPref = std::string_view("defaultGifCollection");
 
 using SetFlag = StickersSetFlag;
 
@@ -451,11 +452,36 @@ void Stickers::renameGifCollection(uint32 id, QString name) {
 }
 
 void Stickers::deleteGifCollection(uint32 id) {
+	const auto isDefault = (id == defaultGifCollectionId());
 	if (std::erase_if(_gifCollections, [=](const GifCollection &collection) {
 		return collection.id == id;
 	})) {
+		if (isDefault) {
+			session().local().clearPref(kDefaultGifCollectionPref);
+		}
 		writeGifCollections();
 	}
+}
+
+uint32 Stickers::defaultGifCollectionId() {
+	const auto id = session().local().readPref<QString>(
+		kDefaultGifCollectionPref,
+		QString()).toUInt();
+	return (id && gifCollection(id)) ? id : 0;
+}
+
+void Stickers::setDefaultGifCollectionId(uint32 id) {
+	if ((id && !gifCollection(id)) || id == defaultGifCollectionId()) {
+		return;
+	}
+	if (id) {
+		session().local().writePref<QString>(
+			kDefaultGifCollectionPref,
+			QString::number(id));
+	} else {
+		session().local().clearPref(kDefaultGifCollectionPref);
+	}
+	_gifCollectionsChanged.fire({});
 }
 
 void Stickers::moveGifCollection(uint32 id, uint32 targetId) {

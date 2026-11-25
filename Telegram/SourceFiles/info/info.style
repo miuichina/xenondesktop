@@ -940,6 +940,11 @@ topBarCall: IconButton(topBarSearch) {
 	icon: icon {{ "top_bar_call", menuIconFg }};
 	iconOver: icon {{ "top_bar_call", menuIconFgOver }};
 }
+topBarRecentActions: IconButton(topBarSearch) {
+	icon: icon {{ "menu/group_log", menuIconFg }};
+	iconOver: icon {{ "menu/group_log", menuIconFgOver }};
+	iconPosition: point(8px, 15px);
+}
 topBarGroupCall: IconButton(topBarSearch) {
 	icon: icon {{ "top_bar_group_call", menuIconFg }};
 	iconOver: icon {{ "top_bar_group_call", menuIconFgOver }};

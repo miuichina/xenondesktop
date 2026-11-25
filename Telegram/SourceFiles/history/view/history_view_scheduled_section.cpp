@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_scheduled_section.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "history/view/controls/history_view_compose_controls.h"
 #include "history/view/history_view_chat_section.h"
 #include "history/view/history_view_empty_list_bubble.h"
@@ -228,6 +230,16 @@ ScheduledWidget::ScheduledWidget(
 	_topBar->deleteSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmDeleteSelected();
+	}, _topBar->lifetime());
+	_topBar->shotSelectionRequest(
+	) | rpl::on_next([=] {
+		if (!_inner) {
+			return;
+		}
+		HistoryView::MessageShot::Show(
+			this->controller(),
+			_inner->getSelectedIds(),
+			crl::guard(this, [=] { clearSelected(); }));
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
 	) | rpl::on_next([=] {

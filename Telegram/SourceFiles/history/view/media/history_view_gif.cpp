@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_gif.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "apiwrap.h"
 #include "api/api_transcribes.h"
 #include "lang/lang_keys.h"
@@ -821,6 +823,7 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 	const auto ttlCovered = _ttlCover && (revealed < 1.);
 	const auto paintInCenter = !_sensitiveSpoiler
 		&& !mediaEditor
+		&& (!MessageShot::Rendering() || ttlCovered)
 		&& (radial
 			|| (!streamingMode
 				&& ((!loaded && !_data->loading()) || !autoplay))
@@ -905,7 +908,7 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 			return spoilerTagBackground();
 		});
 	}
-	if (displayMute) {
+	if (displayMute && !MessageShot::Rendering()) {
 		auto muteRect = style::rtlrect(rthumb.x() + (rthumb.width() - st::historyVideoMessageMuteSize) / 2, rthumb.y() + st::msgDateImgDelta, st::historyVideoMessageMuteSize, st::historyVideoMessageMuteSize, width());
 		p.setPen(Qt::NoPen);
 		p.setBrush(sti->msgDateImgBg);
@@ -1900,6 +1903,7 @@ void Gif::drawGrouped(
 
 	const auto paintInCenter = !_sensitiveSpoiler
 		&& !mediaEditor
+		&& !MessageShot::Rendering()
 		&& (radial
 			|| (!streamingMode
 				&& ((!loaded && !_data->loading()) || !autoplay)));
@@ -2099,6 +2103,12 @@ bool Gif::uploading() const {
 void Gif::hideSpoilers() {
 	if (_spoiler) {
 		_spoiler->revealed = false;
+	}
+}
+
+void Gif::revealSpoilers() {
+	if (_spoiler && !_ttlCover && !_sensitiveSpoiler) {
+		_spoiler->revealed = true;
 	}
 }
 

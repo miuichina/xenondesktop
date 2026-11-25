@@ -70,9 +70,11 @@ class GifCollectionRow final : public Ui::RpWidget {
 public:
 	GifCollectionRow(
 		not_null<Ui::ScrollArea*> bar,
+		int fixedCount,
 		Fn<void(uint32, uint32)> moved)
 	: RpWidget(bar)
 	, _bar(bar)
+	, _fixedCount(fixedCount)
 	, _moved(std::move(moved))
 	, _scrollTimer([=] { scrollDuringDrag(); }) {
 	}
@@ -86,7 +88,7 @@ public:
 		_buttons.push_back({ button, id, left });
 		button->move(left, 0);
 		button->show();
-		if (id) {
+		if (int(_buttons.size()) > _fixedCount) {
 			button->installEventFilter(this);
 		}
 		resize(left + button->width(), button->height());
@@ -107,6 +109,7 @@ private:
 	void scrollDuringDrag();
 
 	const not_null<Ui::ScrollArea*> _bar;
+	const int _fixedCount;
 	Fn<void(uint32, uint32)> _moved;
 	std::vector<Entry> _buttons;
 	base::Timer _scrollTimer;
@@ -122,7 +125,7 @@ private:
 bool GifCollectionRow::eventFilter(QObject *object, QEvent *event) {
 	if (event->type() == QEvent::MouseButtonPress) {
 		const auto mouse = static_cast<QMouseEvent*>(event);
-		if (mouse->button() == Qt::LeftButton && _buttons.size() > 2) {
+		if (mouse->button() == Qt::LeftButton && int(_buttons.size()) > _fixedCount + 1) {
 			const auto i = ranges::find(_buttons, object, [](const Entry &e) {
 				return static_cast<QObject*>(e.button.get());
 			});
@@ -146,7 +149,6 @@ bool GifCollectionRow::eventFilter(QObject *object, QEvent *event) {
 				_buttons[_source].button->setSynteticOver(false);
 				_buttons[_source].button->clearState();
 				_buttons[_source].button->raise();
-				_buttons.front().button->raise();
 				if (_bar->scrollLeftMax()) {
 					_scrollTimer.callEach(kCollectionScrollInterval);
 				}
@@ -180,21 +182,21 @@ void GifCollectionRow::updateDrag() {
 	const auto pointerX = mapFromGlobal(_pointer).x();
 	const auto left = std::clamp(
 		pointerX - _grabOffset,
-		_buttons[1].left,
+		_buttons[_fixedCount].left,
 		width() - buttonWidth);
 	const auto midpoint = [](const Entry &entry) {
 		return entry.left + entry.button->width() / 2;
 	};
 	const auto count = int(_buttons.size());
 	_target = _source;
-	while (_target > 1 && pointerX < midpoint(_buttons[_target - 1])) {
+	while (_target > _fixedCount && pointerX < midpoint(_buttons[_target - 1])) {
 		--_target;
 	}
 	while (_target + 1 < count && pointerX > midpoint(_buttons[_target + 1])) {
 		++_target;
 	}
 	const auto shift = buttonWidth + st::gifCollectionButtonSkip;
-	for (auto i = 1; i < count; ++i) {
+	for (auto i = _fixedCount; i < count; ++i) {
 		const auto &entry = _buttons[i];
 		const auto x = (i == _source)
 			? left
@@ -1031,6 +1033,13 @@ Data::FileOrigin GifsListWidget::inlineItemFileOrigin() {
 }
 
 void GifsListWidget::afterShown() {
+	const auto defaultId = session().data().stickers().defaultGifCollectionId();
+	if (_collectionId != defaultId
+		|| _section != Section::Gifs
+		|| !_inlineNextQuery.isEmpty()) {
+		selectCollection(defaultId);
+	}
+	_collectionBar->scrollToX(0);
 	if (_search) {
 		_search->stealFocus();
 	}
@@ -1100,7 +1109,7 @@ void GifsListWidget::setupCollections() {
 	) | rpl::on_next([=] {
 		if (_collectionId
 			&& !session().data().stickers().gifCollection(_collectionId)) {
-			selectCollection(0);
+			selectCollection(session().data().stickers().defaultGifCollectionId());
 			return;
 		}
 		refreshCollectionButtons();
@@ -1115,7 +1124,9 @@ void GifsListWidget::setupCollections() {
 }
 
 void GifsListWidget::refreshCollectionButtons() {
-	const auto &collections = session().data().stickers().gifCollections();
+	auto &stickers = session().data().stickers();
+	const auto &collections = stickers.gifCollections();
+	const auto defaultId = stickers.defaultGifCollectionId();
 	const auto height = _search->height();
 	_mosaic.setPadding(st::gifsPadding + QMargins(
 		-st::emojiPanRadius,
@@ -1130,6 +1141,7 @@ void GifsListWidget::refreshCollectionButtons() {
 	const auto left = _collectionBar->scrollLeft();
 	auto row = object_ptr<GifCollectionRow>(
 		_collectionBar,
+		defaultId ? 2 : 1,
 		[=](uint32 id, uint32 targetId) {
 			InvokeQueued(this, [=] {
 				session().data().stickers().moveGifCollection(id, targetId);
@@ -1154,7 +1166,7 @@ void GifsListWidget::refreshCollectionButtons() {
 				}
 			});
 		});
-		if (id) {
+		if (id || defaultId) {
 			button->setContextMenuPolicy(Qt::CustomContextMenu);
 			connect(
 				button,
@@ -1166,9 +1178,14 @@ void GifsListWidget::refreshCollectionButtons() {
 		}
 		row->addButton(id, button);
 	};
+	if (const auto collection = stickers.gifCollection(defaultId)) {
+		add(collection->id, collection->name);
+	}
 	add(0, tr::lng_gif_collections_all(tr::now));
 	for (const auto &collection : collections) {
-		add(collection.id, collection.name);
+		if (collection.id != defaultId) {
+			add(collection.id, collection.name);
+		}
 	}
 	_collectionBar->setOwnedWidget(std::move(row));
 	_collectionBar->scrollToX(left);
@@ -1189,11 +1206,30 @@ bool GifsListWidget::hasCollectionMenu() const {
 }
 
 void GifsListWidget::showCollectionMenu(uint32 id, QPoint position) {
-	const auto collection = session().data().stickers().gifCollection(id);
-	if (!collection) {
+	auto &stickers = session().data().stickers();
+	const auto collection = stickers.gifCollection(id);
+	const auto isDefault = (id == stickers.defaultGifCollectionId());
+	if ((id && !collection) || (!id && isDefault)) {
 		return;
 	}
 	_collectionMenu = base::make_unique_q<Ui::PopupMenu>(this, st().menu);
+	if (!isDefault) {
+		_collectionMenu->addAction(
+			tr::lng_gif_collections_set_default(tr::now),
+			crl::guard(this, [=] {
+				auto &stickers = session().data().stickers();
+				if (!id || stickers.gifCollection(id)) {
+					stickers.setDefaultGifCollectionId(id);
+					selectCollection(id);
+					_collectionBar->scrollToX(0);
+				}
+			}),
+			&st::mediaPlayerMenuCheck);
+	}
+	if (!collection) {
+		_collectionMenu->popup(position);
+		return;
+	}
 	_collectionMenu->addAction(
 		tr::lng_gif_collections_rename(tr::now),
 		[=] { editCollection(id); },

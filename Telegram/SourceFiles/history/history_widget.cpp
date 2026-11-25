@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
+
+#include "history/view/history_view_message_shot.h"
 #include "history/view/history_view_top_bar_blur.h"
 
 #include "api/api_compose_with_ai.h"
@@ -1169,6 +1171,13 @@ HistoryWidget::HistoryWidget(
 	_topBar->deleteSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmDeleteSelected();
+	}, _topBar->lifetime());
+	_topBar->shotSelectionRequest(
+	) | rpl::on_next([=] {
+		HistoryView::MessageShot::Show(
+			this->controller(),
+			getSelectedItems(),
+			crl::guard(this, [=] { clearSelected(); }));
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
 	) | rpl::on_next([=] {

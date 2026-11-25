@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_photo.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "boxes/send_credits_box.h"
 #include "history/history_item_components.h"
 #include "history/history_item.h"
@@ -493,12 +495,13 @@ void Photo::draw(Painter &p, const PaintContext &context) const {
 		}
 	}
 
-	const auto showEnlarge = loaded && _enlarge;
+	const auto showEnlarge = loaded && _enlarge && !MessageShot::Rendering();
 	const auto ttlCovered = _ttlCover
 		&& _spoiler
 		&& !_spoiler->revealed;
 	const auto paintInCenter = !_sensitiveSpoiler
 		&& !mediaEditor
+		&& (!MessageShot::Rendering() || ttlCovered)
 		&& (radial || (!loaded && !_data->loading()) || ttlCovered);
 	if (paintInCenter || showEnlarge) {
 		p.setPen(Qt::NoPen);
@@ -974,6 +977,7 @@ void Photo::drawGrouped(
 		&& !_spoiler->revealed;
 	const auto paintInCenter = !_sensitiveSpoiler
 		&& !mediaEditor
+		&& (!MessageShot::Rendering() || ttlCovered)
 		&& (radial
 			|| (!loaded && !_data->loading())
 			|| _data->waitingForAlbum()
@@ -1294,6 +1298,12 @@ bool Photo::videoAutoplayEnabled() const {
 void Photo::hideSpoilers() {
 	if (_spoiler) {
 		_spoiler->revealed = false;
+	}
+}
+
+void Photo::revealSpoilers() {
+	if (_spoiler && !_ttlCover && !_sensitiveSpoiler) {
+		_spoiler->revealed = true;
 	}
 }
 

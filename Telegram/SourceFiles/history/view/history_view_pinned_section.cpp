@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_pinned_section.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "history/view/history_view_chat_section.h"
 #include "history/view/history_view_top_bar_widget.h"
 #include "history/view/history_view_translate_bar.h"
@@ -204,6 +206,16 @@ PinnedWidget::PinnedWidget(
 	_topBar->forwardSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmForwardSelected();
+	}, _topBar->lifetime());
+	_topBar->shotSelectionRequest(
+	) | rpl::on_next([=] {
+		if (!_inner) {
+			return;
+		}
+		HistoryView::MessageShot::Show(
+			this->controller(),
+			_inner->getSelectedIds(),
+			crl::guard(this, [=] { clearSelected(); }));
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
 	) | rpl::on_next([=] {

@@ -4476,6 +4476,19 @@ void Poll::hideSpoilers() {
 	}
 }
 
+void Poll::revealSpoilers() {
+	if (_headerPart->_description.hasSpoilers()) {
+		_headerPart->_description.setSpoilerRevealed(
+			true,
+			anim::type::instant);
+	}
+	if (_headerPart->_solutionText.hasSpoilers()) {
+		_headerPart->_solutionText.setSpoilerRevealed(
+			true,
+			anim::type::instant);
+	}
+}
+
 void Poll::unloadHeavyPart() {
 	_headerPart->unloadHeavyPart();
 	_optionsPart->unloadHeavyPart();

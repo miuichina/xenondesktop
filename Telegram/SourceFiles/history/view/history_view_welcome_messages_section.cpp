@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_welcome_messages_section.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "api/api_sending.h"
 #include "apiwrap.h"
 #include "base/call_delayed.h"
@@ -160,6 +162,16 @@ WelcomeMessagesWidget::WelcomeMessagesWidget(
 	_topBar->deleteSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmDeleteSelected();
+	}, _topBar->lifetime());
+	_topBar->shotSelectionRequest(
+	) | rpl::on_next([=] {
+		if (!_inner) {
+			return;
+		}
+		HistoryView::MessageShot::Show(
+			this->controller(),
+			_inner->getSelectedIds(),
+			crl::guard(this, [=] { clearSelected(); }));
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
 	) | rpl::on_next([=] {

@@ -4899,6 +4899,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gifs_no_saved" = "You have no saved GIFs yet.";
 "lng_gif_collections_all" = "All GIFs";
 "lng_gif_collections_add" = "Add to collection";
+"lng_gif_collections_set_default" = "Set as default";
 "lng_gif_collections_create" = "Create new collection";
 "lng_gif_collections_rename" = "Rename collection";
 "lng_gif_collections_delete" = "Delete collection";
@@ -6064,6 +6065,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_selected_clear" = "Cancel";
 "lng_selected_delete" = "Delete";
+"lng_message_shot" = "Shot";
+"lng_message_shot_preview" = "Preview";
+"lng_message_shot_preferences" = "Preferences";
+"lng_message_shot_theme" = "Theme";
+"lng_message_shot_theme_default" = "Current chat theme";
+"lng_message_shot_theme_accent" = "Accent color";
+"lng_message_shot_background" = "Show background";
+"lng_message_shot_date" = "Show date";
+"lng_message_shot_reactions" = "Show reactions";
+"lng_message_shot_decorations" = "Show header decorations";
+"lng_message_shot_replies" = "Show colorful replies";
+"lng_message_shot_spoilers" = "Reveal spoilers";
+"lng_message_shot_empty" = "There are no selected messages to capture.";
+"lng_message_shot_save_failed" = "Could not save the image.";
+"lng_message_shot_enabled" = "Show Message Shot";
 "lng_selected_forward" = "Forward";
 "lng_selected_send_now" = "Send now";
 "lng_selected_cancel_sure_this" = "Cancel uploading?";

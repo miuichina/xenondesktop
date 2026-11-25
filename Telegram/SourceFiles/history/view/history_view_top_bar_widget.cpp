@@ -6,6 +6,9 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_top_bar_widget.h"
+
+#include "history/admin_log/history_admin_log_section.h"
+#include "history/view/history_view_message_shot.h"
 #include "ui/custom_badge.h"
 #include "history/view/history_view_top_bar_blur.h"
 
@@ -137,10 +140,12 @@ TopBarWidget::TopBarWidget(
 , _forward(this, tr::lng_selected_forward(), st::defaultActiveButton)
 , _sendNow(this, tr::lng_selected_send_now(), st::defaultActiveButton)
 , _delete(this, tr::lng_selected_delete(), st::defaultActiveButton)
+, _shot(this, tr::lng_message_shot(), st::defaultActiveButton)
 , _back(this, st::historyTopBarBack)
 , _cancelChoose(this, st::topBarCloseChoose)
 , _call(this, st::topBarCall)
 , _groupCall(this, st::topBarGroupCall)
+, _recentActions(this, st::topBarRecentActions)
 , _search(this, st::topBarSearch)
 , _infoToggle(this, st::topBarInfo)
 , _menuToggle(this, st::topBarMenuToggle)
@@ -152,6 +157,7 @@ TopBarWidget::TopBarWidget(
 	_forward->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	_sendNow->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 	_delete->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
+	_shot->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 
 	Lang::Updated(
 	) | rpl::on_next([=] {
@@ -164,6 +170,11 @@ TopBarWidget::TopBarWidget(
 	_sendNow->setWidthChangedCallback([=] { updateControlsGeometry(); });
 	_delete->setClickedCallback([=] { _deleteSelection.fire({}); });
 	_delete->setWidthChangedCallback([=] { updateControlsGeometry(); });
+	_shot->setClickedCallback([=] { _shotSelection.fire({}); });
+	_shot->setWidthChangedCallback([=] { updateControlsGeometry(); });
+	MessageShot::EnabledChanges(&session()) | rpl::on_next([=] {
+		showSelected(_lastSelection);
+	}, lifetime());
 	_clear->setClickedCallback([=] { _clearSelection.fire({}); });
 	_call->setClickedCallback([=] { call({}); });
 	_call->setAcceptBoth(true, true);
@@ -173,6 +184,12 @@ TopBarWidget::TopBarWidget(
 		}
 	});
 	_groupCall->setClickedCallback([=] { groupCall(); });
+	_recentActions->setClickedCallback([=] {
+		if (const auto channel = recentActionsChannel()) {
+			_controller->showSection(
+				std::make_shared<AdminLog::SectionMemento>(channel));
+		}
+	});
 	_menuToggle->addClickHandler([=](auto) { showPeerMenu(); });
 	_menuToggle->setAcceptBoth(true, true);
 	_infoToggle->setClickedCallback([=] { toggleInfoSection(); });
@@ -245,7 +262,8 @@ TopBarWidget::TopBarWidget(
 					|| _activeChat.key.peer() == update.peer)) {
 				updateControlsVisibility();
 			}
-		} else if ((update.flags & UpdateFlag::Rights)
+		}
+		if ((update.flags & UpdateFlag::Rights)
 			&& (_activeChat.key.peer() == update.peer)) {
 			updateControlsVisibility();
 		}
@@ -281,6 +299,9 @@ TopBarWidget::TopBarWidget(
 	_call->setAccessibleName(tr::lng_profile_action_short_call(tr::now));
 	_groupCall->setAccessibleName(tr::lng_group_call_title(tr::now));
 	_search->setAccessibleName(tr::lng_shortcuts_search(tr::now));
+	const auto recentActions = tr::lng_manage_peer_recent_actions(tr::now);
+	_recentActions->setAccessibleName(recentActions);
+	_recentActions->setToolTip(recentActions);
 	_infoToggle->setAccessibleName(tr::lng_settings_section_info(tr::now));
 	_menuToggle->setAccessibleName(tr::lng_chat_menu(tr::now));
 	_back->setAccessibleName(tr::lng_go_back(tr::now));
@@ -1278,44 +1299,37 @@ void TopBarWidget::updateControlsGeometry() {
 	const auto backButtonTop = selectedButtonsTop + st::topBarHeight;
 	auto buttonsLeft = st::topBarActionSkip
 		+ (_controller->adaptive().isOneColumn() ? 0 : st::lineWidth);
-	auto buttonsWidth = (_forward->isHidden() ? 0 : _forward->contentWidth())
-		+ (_sendNow->isHidden() ? 0 : _sendNow->contentWidth())
-		+ (_delete->isHidden() ? 0 : _delete->contentWidth())
-		+ _clear->width();
-	buttonsWidth += buttonsLeft + st::topBarActionSkip * 3;
-
-	auto widthLeft = std::min(
-		width() - buttonsWidth,
-		-2 * st::defaultActiveButton.width);
-	auto buttonFullWidth = std::min(-(widthLeft / 2), 0);
-	_forward->setFullWidth(buttonFullWidth);
-	_sendNow->setFullWidth(buttonFullWidth);
-	_delete->setFullWidth(buttonFullWidth);
-
+	const auto buttons = std::array{
+		_forward.data(),
+		_sendNow.data(),
+		_delete.data(),
+		_shot.data(),
+	};
+	auto buttonsWidth = buttonsLeft + _clear->width() + st::topBarActionSkip;
+	auto visibleButtons = 0;
+	for (const auto button : buttons) {
+		if (!button->isHidden()) {
+			buttonsWidth += button->contentWidth() + st::topBarActionSkip;
+			++visibleButtons;
+		}
+	}
+	const auto buttonPadding = std::min(
+		(width() - buttonsWidth) / std::max(visibleButtons, 1),
+		-st::defaultActiveButton.width);
 	selectedButtonsTop += (height() - _forward->height()) / 2;
-
-	_forward->moveToLeft(buttonsLeft, selectedButtonsTop);
-	if (!_forward->isHidden()) {
-		buttonsLeft += _forward->width() + st::topBarActionSkip;
+	for (const auto button : buttons) {
+		if (!button->isHidden()) {
+			button->setFullWidth(-std::max(buttonPadding, 2));
+			button->moveToLeft(buttonsLeft, selectedButtonsTop);
+			buttonsLeft += button->width() + st::topBarActionSkip;
+		}
 	}
-
-	_sendNow->moveToLeft(buttonsLeft, selectedButtonsTop);
-	if (!_sendNow->isHidden()) {
-		buttonsLeft += _sendNow->width() + st::topBarActionSkip;
-	}
-
-	_delete->moveToLeft(buttonsLeft, selectedButtonsTop);
 	{
 		const auto large = st::topBarActionButtonLargeRadius;
 		const auto &buttonSt = st::defaultActiveButton;
 		const auto small = buttonSt.radius
 			? buttonSt.radius
 			: st::buttonRadius;
-		const auto buttons = std::array{
-			_forward.data(),
-			_sendNow.data(),
-			_delete.data(),
-		};
 		auto first = (Ui::RoundButton*)(nullptr);
 		auto last = (Ui::RoundButton*)(nullptr);
 		for (const auto button : buttons) {
@@ -1425,6 +1439,10 @@ void TopBarWidget::updateControlsGeometry() {
 		_groupCall->moveToRight(_rightTaken, otherButtonsTop);
 		_rightTaken += _call->width();
 	}
+	if (!_recentActions->isHidden()) {
+		_recentActions->moveToRight(_rightTaken, otherButtonsTop);
+		_rightTaken += _recentActions->width();
+	}
 	_search->moveToRight(_rightTaken, otherButtonsTop);
 	if (!_search->isHidden()) {
 		_rightTaken += _search->width() + st::topBarCallSkip;
@@ -1452,6 +1470,20 @@ void TopBarWidget::setAnimatingMode(bool enabled) {
 	}
 }
 
+ChannelData *TopBarWidget::recentActionsChannel() const {
+	const auto peer = _activeChat.key.peer();
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	if (!channel || (!channel->hasAdminRights() && !channel->amCreator())) {
+		return nullptr;
+	}
+	const auto section = _activeChat.section;
+	const auto shown = (section == Section::History)
+		|| (section == Section::Replies && _activeChat.key.topic())
+		|| (section == Section::ChatsList && !_activeChat.key.folder()
+			&& (channel->isForum() || channel->isCommunity()));
+	return shown ? channel : nullptr;
+}
+
 void TopBarWidget::updateControlsVisibility() {
 	if (!_activeChat.key) {
 		return;
@@ -1464,6 +1496,7 @@ void TopBarWidget::updateControlsVisibility() {
 	_delete->setVisible(_canDelete && visible);
 	_forward->setVisible(_canForward && visible);
 	_sendNow->setVisible(_canSendNow && visible);
+	_shot->setVisible(_canShot && visible && !_chooseForReportReason);
 
 
 	const auto isOneColumn = _controller->adaptive().isOneColumn();
@@ -1541,6 +1574,9 @@ void TopBarWidget::updateControlsVisibility() {
 		&& !_chooseForReportReason
 		&& (_narrowRatio < 1.
 			|| (rootChatsListBar() && _activeChat.key.folder())));
+	_recentActions->setVisible(recentActionsChannel()
+		&& !_chooseForReportReason
+		&& (_narrowRatio < 1.));
 	_infoToggle->setVisible(hasInfo
 		&& !isOneColumn
 		&& _controller->canShowThirdSection()
@@ -1614,18 +1650,23 @@ void TopBarWidget::updateMembersShowArea() {
 
 bool TopBarWidget::showSelectedState() const {
 	return (_selectedCount > 0)
-		&& (_canDelete || _canForward || _canSendNow);
+		&& (_canDelete || _canForward || _canSendNow || _canShot);
 }
 
 void TopBarWidget::showSelected(SelectedState state) {
+	_lastSelection = state;
 	auto canDelete = (state.count > 0 && state.count == state.canDeleteCount);
 	auto canForward = (state.count > 0 && state.count == state.canForwardCount);
 	auto canSendNow = (state.count > 0 && state.count == state.canSendNowCount);
-	auto count = (!canDelete && !canForward && !canSendNow) ? 0 : state.count;
+	auto canShot = (state.count > 0 && MessageShot::Enabled(&session()));
+	auto count = (canDelete || canForward || canSendNow || canShot)
+		? state.count
+		: 0;
 	if (_selectedCount == count
 		&& _canDelete == canDelete
 		&& _canForward == canForward
-		&& _canSendNow == canSendNow) {
+		&& _canSendNow == canSendNow
+		&& _canShot == canShot) {
 		return;
 	}
 	if (count == 0) {
@@ -1633,16 +1674,19 @@ void TopBarWidget::showSelected(SelectedState state) {
 		canDelete = _canDelete;
 		canForward = _canForward;
 		canSendNow = _canSendNow;
+		canShot = _canShot && MessageShot::Enabled(&session());
 	}
 
 	const auto wasSelectedState = showSelectedState();
 	const auto visibilityChanged = (_canDelete != canDelete)
 		|| (_canForward != canForward)
-		|| (_canSendNow != canSendNow);
+		|| (_canSendNow != canSendNow)
+		|| (_canShot != canShot);
 	_selectedCount = count;
 	_canDelete = canDelete;
 	_canForward = canForward;
 	_canSendNow = canSendNow;
+	_canShot = canShot;
 	const auto nowSelectedState = showSelectedState();
 	if (nowSelectedState) {
 		_forward->setNumbersText(_selectedCount);

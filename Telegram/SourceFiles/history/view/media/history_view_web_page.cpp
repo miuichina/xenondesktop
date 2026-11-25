@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_web_page.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "countries/countries_instance.h"
@@ -1042,7 +1044,8 @@ void WebPage::draw(Painter &p, const PaintContext &context) const {
 			useColorIndex ? (colorIndex + 1) : 0)];
 	Ui::Text::ValidateQuotePaintCache(*cache, _st);
 	Ui::Text::FillQuotePaint(p, outer, *cache, _st);
-	if (backgroundEmojiData) {
+	if (backgroundEmojiData
+		&& !MessageShot::Hide(MessageShot::Part::ColorfulReplies)) {
 		ValidateBackgroundEmoji(
 			backgroundEmojiId,
 			colorCollectible,

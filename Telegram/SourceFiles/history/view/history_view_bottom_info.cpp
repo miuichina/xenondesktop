@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_bottom_info.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "ayu/deleted_messages.h"
 #include "base/options.h"
 
@@ -179,7 +181,8 @@ TextState BottomInfo::textState(
 	}
 	const auto textWidth = _authorEditedDate.maxWidth();
 	auto withTicksWidth = textWidth;
-	if (_data.flags & (Data::Flag::OutLayout | Data::Flag::Sending)) {
+	if (!MessageShot::Rendering()
+		&& (_data.flags & (Data::Flag::OutLayout | Data::Flag::Sending))) {
 		withTicksWidth += st::historySendStateSpace;
 	}
 	if (!_views.isEmpty()) {
@@ -287,7 +290,7 @@ void BottomInfo::paint(
 
 	auto right = position.x() + width();
 	const auto firstLineBottom = position.y() + st::msgDateFont->height;
-	if (_data.flags & Data::Flag::OutLayout) {
+	if (!MessageShot::Rendering() && (_data.flags & Data::Flag::OutLayout)) {
 		const auto &icon = (_data.flags & Data::Flag::Sending)
 			? (inverted
 				? st->historySendingInvertedIcon()
@@ -379,7 +382,8 @@ void BottomInfo::paint(
 			firstLineBottom + st::historyViewsTop,
 			outer(right, icon));
 	}
-	if ((_data.flags & Data::Flag::Sending)
+	if (!MessageShot::Rendering()
+		&& (_data.flags & Data::Flag::Sending)
 		&& !(_data.flags & Data::Flag::OutLayout)) {
 		right -= st::historySendStateSpace;
 		const auto &icon = inverted
@@ -610,7 +614,8 @@ QSize BottomInfo::countOptimalSize() {
 		return { st::historyShortcutStateSpace, st::msgDateFont->height };
 	}
 	auto width = 0;
-	if (_data.flags & (Data::Flag::OutLayout | Data::Flag::Sending)) {
+	if (!MessageShot::Rendering()
+		&& (_data.flags & (Data::Flag::OutLayout | Data::Flag::Sending))) {
 		width += st::historySendStateSpace;
 	}
 	width += _authorEditedDate.maxWidth();

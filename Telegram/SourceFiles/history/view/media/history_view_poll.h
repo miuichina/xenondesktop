@@ -68,6 +68,7 @@ public:
 		bool pressed) override;
 
 	void hideSpoilers() override;
+	void revealSpoilers() override;
 
 	void unloadHeavyPart() override;
 	bool hasHeavyPart() const override;

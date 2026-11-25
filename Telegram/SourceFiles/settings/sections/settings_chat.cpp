@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "history/view/history_view_quick_action.h"
+#include "history/view/history_view_message_shot.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "window/themes/window_theme.h"
@@ -1569,6 +1570,20 @@ void SetupMessages(
 	});
 
 	Ui::AddSkip(inner, st::settingsCheckboxesSkip);
+
+	const auto session = &controller->session();
+	AddButtonWithIcon(
+		inner,
+		tr::lng_message_shot_enabled(),
+		st::settingsButtonNoIcon
+	)->toggleOn(rpl::single(
+		HistoryView::MessageShot::Enabled(session)
+	) | rpl::then(HistoryView::MessageShot::EnabledChanges(session)
+		| rpl::map([=] { return HistoryView::MessageShot::Enabled(session); })
+	))->toggledValue(
+	) | rpl::skip(1) | rpl::on_next([=](bool enabled) {
+		HistoryView::MessageShot::SetEnabled(session, enabled);
+	}, inner->lifetime());
 
 	const auto groupQuick = std::make_shared<Ui::RadioenumGroup<Quick>>(
 		Core::App().settings().chatQuickAction());

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_message.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "api/api_suggest_post.h"
 #include "api/api_transcribes.h"
 #include "base/options.h"
@@ -1111,7 +1113,9 @@ void Message::refreshRightBadge() {
 	if (const auto badge = Get<RightBadge>(); badge && badge->overridden) {
 		return;
 	}
-	if (hasOutLayout() || context() == Context::WelcomeMessages) {
+	if (MessageShot::Hide(MessageShot::Part::HeaderDecorations)
+		|| (hasOutLayout() && !MessageShot::Rendering())
+		|| context() == Context::WelcomeMessages) {
 		if (Has<RightBadge>()) {
 			RemoveComponents(RightBadge::Bit());
 		}
@@ -6088,7 +6092,7 @@ bool Message::displayRightActionComments() const {
 }
 
 std::optional<QSize> Message::rightActionSize() const {
-	if (context() == Context::MediaEditor) {
+	if (context() == Context::MediaEditor || MessageShot::Rendering()) {
 		return std::nullopt;
 	} else if (displayRightActionComments()) {
 		const auto views = data()->Get<HistoryMessageViews>();

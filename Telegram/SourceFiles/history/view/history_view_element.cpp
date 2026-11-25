@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_element.h"
 
+#include "history/view/history_view_message_shot.h"
+
 #include "ayu/deleted_messages.h"
 
 #include "apiwrap.h"
@@ -1409,6 +1411,15 @@ void Element::hideSpoilers() {
 	}
 }
 
+void Element::revealSpoilers() {
+	if (_text.hasSpoilers()) {
+		_text.setSpoilerRevealed(true, anim::type::instant);
+	}
+	if (_media) {
+		_media->revealSpoilers();
+	}
+}
+
 void Element::customEmojiRepaint() {
 	if (!(_flags & Flag::CustomEmojiRepainting)) {
 		_flags |= Flag::CustomEmojiRepainting;
@@ -1681,7 +1692,8 @@ bool Element::isTopicRootReply() const {
 }
 
 bool Element::hidesBottomInfo() const {
-	return data()->isWelcomeTemplate()
+	return MessageShot::Hide(MessageShot::Part::Date)
+		|| data()->isWelcomeTemplate()
 		|| (data()->isFakeHistoryItem()
 			&& context() == Context::MediaEditor);
 }
@@ -3098,10 +3110,14 @@ void Element::setupReactions(Element *replacing) {
 }
 
 void Element::refreshReactions() {
+	if (context() == Context::MediaEditor
+		|| MessageShot::Hide(MessageShot::Part::Reactions)) {
+		setReactions(nullptr);
+		return;
+	}
 	using namespace Reactions;
 	auto reactionsData = InlineListDataFromMessage(this);
-	if (reactionsData.reactions.empty()
-		|| context() == Context::MediaEditor) {
+	if (reactionsData.reactions.empty()) {
 		setReactions(nullptr);
 		return;
 	}

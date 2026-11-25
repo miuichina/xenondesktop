@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_chat_section.h"
+
+#include "history/view/history_view_message_shot.h"
 #include "history/view/history_view_top_bar_blur.h"
 #include "base/options.h"
 
@@ -529,6 +531,16 @@ ChatWidget::ChatWidget(
 	_topBar->forwardSelectionRequest(
 	) | rpl::on_next([=] {
 		confirmForwardSelected();
+	}, _topBar->lifetime());
+	_topBar->shotSelectionRequest(
+	) | rpl::on_next([=] {
+		if (!_inner) {
+			return;
+		}
+		HistoryView::MessageShot::Show(
+			this->controller(),
+			_inner->getSelectedIds(),
+			crl::guard(this, [=] { clearSelected(); }));
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
 	) | rpl::on_next([=] {

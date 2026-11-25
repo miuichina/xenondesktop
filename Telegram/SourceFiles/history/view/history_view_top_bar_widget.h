@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_report.h"
 #include "dialogs/dialogs_key.h"
 
+class ChannelData;
+
 namespace style {
 struct UserpicButton;
 } // namespace style
@@ -118,6 +120,9 @@ public:
 	[[nodiscard]] rpl::producer<> deleteSelectionRequest() const {
 		return _deleteSelection.events();
 	}
+	[[nodiscard]] rpl::producer<> shotSelectionRequest() const {
+		return _shotSelection.events();
+	}
 	[[nodiscard]] rpl::producer<> clearSelectionRequest() const {
 		return _clearSelection.events();
 	}
@@ -167,6 +172,7 @@ private:
 
 	void call(Calls::StartOutgoingCallArgs);
 	void groupCall();
+	[[nodiscard]] ChannelData *recentActionsChannel() const;
 	void showGroupCallMenu(not_null<PeerData*> peer);
 	void showCallMenu();
 	void toggleInfoSection();
@@ -241,13 +247,15 @@ private:
 	bool _canDelete = false;
 	bool _canForward = false;
 	bool _canSendNow = false;
+	bool _canShot = false;
+	SelectedState _lastSelection;
 	bool _searchMode = false;
 
 	Ui::Animations::Simple _selectedShown;
 	Ui::Animations::Simple _searchShown;
 
 	object_ptr<Ui::RoundButton> _clear;
-	object_ptr<Ui::RoundButton> _forward, _sendNow, _delete;
+	object_ptr<Ui::RoundButton> _forward, _sendNow, _delete, _shot;
 	object_ptr<Ui::InputField> _searchField = { nullptr };
 	object_ptr<Ui::FadeWrapScaled<Ui::IconButton>> _chooseFromUser
 		= { nullptr };
@@ -268,6 +276,7 @@ private:
 
 	object_ptr<Ui::IconButton> _call;
 	object_ptr<Ui::IconButton> _groupCall;
+	object_ptr<Ui::IconButton> _recentActions;
 	object_ptr<Ui::IconButton> _search;
 	object_ptr<Ui::IconButton> _infoToggle;
 	object_ptr<Ui::IconButton> _menuToggle;
@@ -297,6 +306,7 @@ private:
 	rpl::event_stream<> _sendNowSelection;
 	rpl::event_stream<> _deleteSelection;
 	rpl::event_stream<> _clearSelection;
+	rpl::event_stream<> _shotSelection;
 	rpl::event_stream<> _cancelChooseForReport;
 
 	rpl::lifetime _backLifetime;
