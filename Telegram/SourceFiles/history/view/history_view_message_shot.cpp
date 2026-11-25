@@ -563,8 +563,9 @@ void ShotBox::loadCloudPalette(const Data::CloudTheme &cloud) {
 			document->location().name(),
 			cloud);
 		if (preview) {
-			_palette = std::make_unique<style::palette>(
-				preview->instance.palette);
+			_palette = std::make_unique<style::palette>();
+			*_palette = preview->instance.palette;
+			_palette->finalize();
 			_previewTimer.callOnce(0);
 		}
 	};
