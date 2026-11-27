@@ -7,12 +7,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_slide_animation.h"
 #include "styles/style_basic.h"
+#include "ui/painter.h"
+#include <QtWidgets/QWidget>
 
 
 namespace Window {
 
 void SlideAnimation::paintContents(QPainter &p) const {
 	const auto retina = style::DevicePixelRatio();
+	const auto deviceWidget = dynamic_cast<QWidget*>(p.device());
+	const auto wallpaperBackdrop = deviceWidget && Ui::BackgroundUsesDeviceCoordinates
+		&& Ui::BackgroundUsesDeviceCoordinates(deviceWidget);
+	if (wallpaperBackdrop) {
+		// Alpha fades expose the area below both snapshots. Paint the same
+		// desktop background there instead of inheriting a solid theme fill.
+		Ui::FillBackground(p, QRect(0, 0,
+			std::max(_cacheUnder.width(), _cacheOver.width()) / retina,
+			std::max(_cacheUnder.height(), _cacheOver.height()) / retina), st::windowBg);
+	}
 
 	const auto slideLeft = (_direction == SlideDirection::FromLeft);
 	const auto progress = _animation.value(slideLeft ? 0. : 1.);
@@ -134,7 +146,8 @@ void SlideAnimation::paintContents(QPainter &p) const {
 				0,
 				0,
 				coordOver, _cacheUnder.height() / retina,
-				st::slideFadeOutBg);
+				wallpaperBackdrop ? QColor(0, 0, 0, st::slideFadeOutBg->c.alpha())
+					: st::slideFadeOutBg->c);
 			p.setOpacity(1);
 		}
 		p.drawPixmap(

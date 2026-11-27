@@ -112,6 +112,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QTextEdit>
 
+#ifdef Q_OS_WIN
+#include "platform/win/main_window_win.h"
+#endif
+
 namespace Dialogs {
 namespace {
 
@@ -298,8 +302,15 @@ Widget::Widget(
 	_scrollToTop->raise();
 	_headerBlur = std::make_unique<HistoryView::BlurBackground>(
 		_searchControls.data(),
-		[=] { return renderBlurBackdrop(_searchControls->geometry()); },
-		[] { return st::dialogsBg->c; });
+		[=] { return renderBlurBackdrop(_searchControls->geometry(), true); },
+		[] { return st::dialogsBg->c; },
+		-1.f,
+		[=] {
+			const auto distance = std::max(_searchControls->height(), 1);
+			const auto progress = std::clamp(_scroll->scrollTop() / float64(distance), 0., 1.);
+			// Smoothstep reaches zero and full strength without a sharp edge.
+			return float(progress * progress * (3. - 2. * progress));
+		});
 	_inner->backdropChanges() | rpl::on_next([=](QRect area) {
 		if (area.isEmpty()) {
 			invalidateBlurBackdrop();
@@ -325,6 +336,9 @@ Widget::Widget(
 		invalidateBlurBackdrop(false);
 	}, lifetime());
 	rpl::merge(
+#ifdef Q_OS_WIN
+		Platform::WallpaperPositionChanges(),
+#endif
 		style::PaletteChanged(),
 		base::options::lookup<bool>(HistoryView::kOptionBlurEffects).changes(),
 		base::options::lookup<int>(HistoryView::kOptionBlurIntensity).changes()
@@ -5035,13 +5049,14 @@ bool Widget::redirectImeToSearch() const {
 	return redirectToSearchPossible();
 }
 
-QImage Widget::renderBlurBackdrop(QRect area) {
+QImage Widget::renderBlurBackdrop(QRect area, bool fullResolution) {
 	if (!_inner || _scroll->isHidden() || area.isEmpty()) {
 		return QImage();
 	}
 	const auto padding = st::topBarBlurRadius;
 	const auto bandHeight = area.height() + 2 * padding;
-	const auto scale = devicePixelRatioF() / HistoryView::BlurTextureDownscale();
+	const auto scale = devicePixelRatioF()
+		/ (fullResolution ? 1. : HistoryView::BlurTextureDownscale());
 	auto image = QImage(
 		QSize(
 			std::max(int(std::ceil(area.width() * scale)), 1),
@@ -5051,6 +5066,11 @@ QImage Widget::renderBlurBackdrop(QRect area) {
 	Painter p(&image);
 	p.scale(image.width() / float64(area.width()), image.height() / float64(bandHeight));
 	p.translate(-area.x(), padding - area.y());
+#ifdef Q_OS_WIN
+	const auto wallpaperScope = Platform::WallpaperPaintScope(
+		this, true, p.worldTransform());
+#endif
+	p.fillRect(area.adjusted(0, -padding, 0, padding), st::dialogsBg);
 	const auto origin = _inner->mapTo(this, QPoint());
 	const auto clip = area.adjusted(0, -padding, 0, padding).translated(-origin);
 	p.translate(origin);
@@ -5058,6 +5078,10 @@ QImage Widget::renderBlurBackdrop(QRect area) {
 	auto &cache = _blurContentCache[
 		_subsectionTopBar && area == _subsectionTopBar->geometry() ? 1 : 0];
 	cache.paint(p, clip, scale, [&](Painter &p, QRect cachedArea) {
+#ifdef Q_OS_WIN
+		const auto wallpaperScope = Platform::WallpaperPaintScope(
+			_inner, true, p.worldTransform());
+#endif
 		_inner->paintBackdrop(p, cachedArea);
 	});
 	return image;

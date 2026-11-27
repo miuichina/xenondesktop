@@ -322,37 +322,29 @@ const auto kMeta = BuildHelper({
 	builder.addDivider();
 
 #ifdef Q_OS_WIN
-	auto &acrylicOption = base::options::lookup<bool>(Window::kOptionWindowsAcrylic);
-	const auto acrylic = builder.addButton({
-		.id = u"xenon/windows_acrylic"_q,
-		.title = tr::lng_settings_xenon_windows_acrylic(),
-		.toggled = rpl::single(acrylicOption.value()),
-		.keywords = { u"windows"_q, u"acrylic"_q, u"blur"_q },
+	auto &wallpaperOption = base::options::lookup<bool>(Window::kOptionWallpaperBackdrop);
+	const auto wallpaper = builder.addButton({
+		.id = u"xenon/wallpaper_backdrop"_q,
+		.title = tr::lng_settings_xenon_wallpaper_backdrop(),
+		.toggled = rpl::single(wallpaperOption.value()),
+		.keywords = { u"wallpaper"_q, u"desktop"_q, u"blur"_q },
 	});
-	if (acrylic) {
-		acrylic->setEnabled(acrylicOption.relevant());
-		acrylic->toggledChanges() | rpl::on_next([
-			option = &acrylicOption,
-			controller = builder.controller()
+	if (wallpaper) {
+		wallpaper->toggledChanges() | rpl::on_next([
+			option = &wallpaperOption
 		](bool checked) {
 			option->set(checked);
-			controller->show(Ui::MakeConfirmBox({
-				.text = tr::lng_settings_need_restart(),
-				.confirmed = [] { Core::Restart(); },
-				.confirmText = tr::lng_settings_restart_now(),
-				.cancelText = tr::lng_settings_restart_later(),
-			}));
-		}, acrylic->lifetime());
+		}, wallpaper->lifetime());
 	}
-	builder.addDividerText(tr::lng_settings_xenon_windows_acrylic_about());
+	builder.addDividerText(tr::lng_settings_xenon_wallpaper_backdrop_about());
 	builder.scope([&] {
 		builder.addSubsectionTitle({
-			.id = u"xenon/windows_background_opacity"_q,
-			.title = tr::lng_settings_xenon_windows_background_opacity(),
+			.id = u"xenon/wallpaper_blur"_q,
+			.title = tr::lng_settings_xenon_wallpaper_blur(),
 		});
 		builder.add([](const WidgetContext &ctx) -> SectionBuilder::WidgetToAdd {
 			auto &option = base::options::lookup<int>(
-				Window::kOptionWindowsBackgroundOpacity);
+				Window::kOptionWallpaperBlur);
 			auto control = MakeSliderWithLabel(
 				ctx.container,
 				st::settingsScale,
@@ -363,7 +355,7 @@ const auto kMeta = BuildHelper({
 			const auto slider = control.slider;
 			const auto label = control.label;
 			slider->setAccessibleName(
-				tr::lng_settings_xenon_windows_background_opacity(tr::now));
+				tr::lng_settings_xenon_wallpaper_blur(tr::now));
 			slider->setPseudoDiscrete(
 				101,
 				[](int index) { return index; },
@@ -381,7 +373,42 @@ const auto kMeta = BuildHelper({
 				.margin = st::settingsBigScalePadding,
 			};
 		});
-	}, acrylic ? acrylic->toggledValue() : rpl::producer<bool>(nullptr));
+		builder.addSubsectionTitle({
+			.id = u"xenon/wallpaper_tint_opacity"_q,
+			.title = tr::lng_settings_xenon_wallpaper_tint_opacity(),
+		});
+		builder.add([](const WidgetContext &ctx) -> SectionBuilder::WidgetToAdd {
+			auto &option = base::options::lookup<int>(
+				Window::kOptionWallpaperTintOpacity);
+			auto control = MakeSliderWithLabel(
+				ctx.container,
+				st::settingsScale,
+				st::settingsScaleLabel,
+				st::normalFont->spacew * 2,
+				st::settingsScaleLabel.style.font->width(u"100%"_q),
+				true);
+			const auto slider = control.slider;
+			const auto label = control.label;
+			slider->setAccessibleName(
+				tr::lng_settings_xenon_wallpaper_tint_opacity(tr::now));
+			slider->setPseudoDiscrete(
+				101,
+				[](int index) { return index; },
+				std::clamp(option.value(), 0, 100),
+				[option = &option](int value) { option->set(value); });
+			rpl::merge(
+				rpl::single(rpl::empty_value()),
+				option.changes()
+			) | rpl::on_next([label, option = &option] {
+				label->setText(QString::number(
+					std::clamp(option->value(), 0, 100)) + '%');
+			}, slider->lifetime());
+			return {
+				.widget = std::move(control.widget),
+				.margin = st::settingsBigScalePadding,
+			};
+		});
+	}, wallpaper ? wallpaper->toggledValue() : rpl::producer<bool>(nullptr));
 	builder.addDivider();
 #endif
 	auto &smoothScroll = base::options::lookup<bool>("xenon-smooth-scroll");

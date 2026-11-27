@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "ui/painter.h"
 #include "window/window_filters_menu.h"
 
 #include "menu/menu_mark_as_read.h"
@@ -135,7 +136,7 @@ void FiltersMenu::setup() {
 	_container->setVisualTabOrder(true);
 	_outer.paintRequest(
 	) | rpl::on_next([=](QRect clip) {
-		auto p = QPainter(&_outer);
+		auto p = Painter(&_outer);
 		p.setPen(Qt::NoPen);
 		p.setBrush(st::windowFiltersButton.textBg);
 		p.drawRect(clip);

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/vertical_list.h"
+#include "ui/painter.h"
 
 #include "lang/lang_text_entity.h"
 #include "ui/widgets/box_content_divider.h"
@@ -72,12 +73,13 @@ not_null<Ui::FlatLabel*> AddSubsectionTitle(
 		rpl::producer<QString> text,
 		style::margins addPadding,
 		const style::FlatLabel *st) {
-	return container->add(
+	const auto result = container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
 			std::move(text),
 			st ? *st : st::defaultSubsectionTitle),
 		st::defaultSubsectionTitlePadding + addPadding);
+	return result;
 }
 
 } // namespace Ui

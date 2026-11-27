@@ -190,8 +190,8 @@ void TabbedSelector::SlideAnimation::paintFrame(
 	{
 		auto p = QPainter(&_frame);
 		p.setOpacity(opacity);
-		p.fillRect(_painterInnerLeft, _painterInnerTop, _painterInnerWidth, _painterCategoriesTop - _painterInnerTop, st.bg);
-		p.fillRect(_painterInnerLeft, _painterCategoriesTop, _painterInnerWidth, _painterInnerBottom - _painterCategoriesTop, _wasSectionIcons ? st.categoriesBg : st.bg);
+		Ui::FillBackground(p, QRect(_painterInnerLeft, _painterInnerTop, _painterInnerWidth, _painterCategoriesTop - _painterInnerTop), st.bg);
+		Ui::FillBackground(p, QRect(_painterInnerLeft, _painterCategoriesTop, _painterInnerWidth, _painterInnerBottom - _painterCategoriesTop), _wasSectionIcons ? st.categoriesBg : st.bg);
 		p.setCompositionMode(QPainter::CompositionMode_SourceOver);
 		if (leftTo > _innerLeft) {
 			p.setOpacity(opacity * leftAlpha);
@@ -963,7 +963,7 @@ void TabbedSelector::paintSlideFrame(QPainter &p) {
 	if (_roundRadius > 0) {
 		paintBgRoundedPart(p);
 	} else if (_tabsSlider) {
-		p.fillRect(0, 0, width(), _tabsSlider->height(), _st.bg);
+		Ui::FillBackground(p, QRect(0, 0, width(), _tabsSlider->height()), _st.bg);
 	}
 	auto slideDt = _a_slide.value(1.);
 	_slideAnimation->paintFrame(p, _st, slideDt, 1.);
@@ -1015,26 +1015,22 @@ void TabbedSelector::paintContent(QPainter &p) {
 		});
 	} else {
 		if (_tabsSlider) {
-			p.fillRect(0, 0, width(), _tabsSlider->height(), _st.bg);
+			Ui::FillBackground(p, QRect(0, 0, width(), _tabsSlider->height()), _st.bg);
 		}
-		p.fillRect(0, _footerTop, width(), _st.footer, footerBg);
+		Ui::FillBackground(p, QRect(0, _footerTop, width(), _st.footer), footerBg);
 	}
 
 	auto sidesTop = marginTop();
 	auto sidesHeight = height() - sidesTop - marginBottom();
 	if (_restrictedLabel) {
-		p.fillRect(0, sidesTop, width(), sidesHeight, st::emojiPanBg);
+		Ui::FillBackground(p, QRect(0, sidesTop, width(), sidesHeight), st::emojiPanBg);
 	} else {
-		p.fillRect(
-			myrtlrect(
+		Ui::FillBackground(p, myrtlrect(
 				width() - _st.scroll.width,
 				sidesTop,
 				_st.scroll.width,
-				sidesHeight),
-			_st.bg);
-		p.fillRect(
-			myrtlrect(0, sidesTop, st::emojiPanRadius, sidesHeight),
-			_st.bg);
+				sidesHeight), _st.bg);
+		Ui::FillBackground(p, myrtlrect(0, sidesTop, st::emojiPanRadius, sidesHeight), _st.bg);
 	}
 }
 

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_builder.h"
+#include "ui/painter.h"
 
 #include "apiwrap.h"
 #include "lang/lang_keys.h"
@@ -408,6 +409,12 @@ Ui::Checkbox *SectionBuilder::addCheckbox(CheckboxArgs &&args) {
 
 void SectionBuilder::addSubsectionTitle(SubsectionTitleArgs &&args) {
 	v::match(_context, [&](const WidgetContext &ctx) {
+		if (!ctx.container->property("xenonSettingsBackground").toBool()) {
+			ctx.container->setProperty("xenonSettingsBackground", true);
+			ctx.container->paintRequest() | rpl::on_next([container = ctx.container](QRect clip) {
+				Painter(container).fillRect(clip, st::boxBg);
+			}, ctx.container->lifetime());
+		}
 		const auto title = AddSubsectionTitle(
 			ctx.container,
 			rpl::duplicate(args.title));

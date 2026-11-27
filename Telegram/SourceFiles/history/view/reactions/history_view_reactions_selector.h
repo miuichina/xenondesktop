@@ -158,6 +158,7 @@ private:
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 
+	void paintWallpaperBackground(QPainter &p, QRect area, float64 radius);
 	void paintAppearing(QPainter &p);
 	void paintCollapsed(QPainter &p);
 	void paintExpanding(Painter &p, float64 progress);

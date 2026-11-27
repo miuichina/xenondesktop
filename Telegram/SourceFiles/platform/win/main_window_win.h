@@ -8,8 +8,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "platform/platform_main_window.h"
+#include "ui/painter.h"
 #include "base/flags.h"
 
+#include <QtGui/QTransform>
 #include <windows.h>
 
 namespace Ui {
@@ -23,6 +25,9 @@ public:
 	explicit MainWindow(not_null<Window::Controller*> controller);
 
 	HWND psHwnd() const;
+	void refreshWallpaper();
+	void repaintWallpaperPosition();
+	[[nodiscard]] QBrush wallpaperBrush(QWidget *widget, QColor color, int minimumOpacity = 0);
 
 	void updateWindowIcon() override;
 	bool isActiveForTrayMenu() override;
@@ -75,7 +80,6 @@ private:
 	};
 
 	void setupNativeWindowFrame();
-	void updateWindowsBackdrop();
 	void setupPreviewPasscodeLock();
 	void updateTaskbarAndIconCounters();
 	void validateWindowTheme(bool native, bool night);
@@ -106,19 +110,26 @@ private:
 
 };
 
-void EnsureWindowsAcrylic(QWidget *widget);
+[[nodiscard]] rpl::producer<> WallpaperPositionChanges();
 
-class WindowsBackdropPaintScope final {
+class WallpaperPaintScope final : public Ui::BackgroundRenderScope {
 public:
-	explicit WindowsBackdropPaintScope(QWidget *widget);
-	~WindowsBackdropPaintScope();
+	explicit WallpaperPaintScope(
+		QWidget *widget,
+		bool raster = false,
+		QTransform transform = QTransform());
+	~WallpaperPaintScope();
+	WallpaperPaintScope(const WallpaperPaintScope &) = delete;
+	WallpaperPaintScope &operator=(const WallpaperPaintScope &) = delete;
 
 private:
-	float64 _previous = 1.;
+	QWidget *_previous = nullptr;
+	bool _previousRaster = false;
+	QTransform _previousTransform;
 
 };
 
-[[nodiscard]] float64 WindowsBackdropPaintOpacity();
+[[nodiscard]] bool PaintWallpaperBackground(QPainter &p, QRect area, QColor tint);
 
 [[nodiscard]] int32 ScreenNameChecksum(const QString &name);
 [[nodiscard]] int32 ScreenNameChecksum(const QScreen *screen);

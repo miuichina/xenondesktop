@@ -499,7 +499,13 @@ void PaintRow(
 	if (swipeTranslation) {
 		p.translate(swipeMirrored ? swipeTranslation : -swipeTranslation, 0);
 	}
-	p.fillRect(geometry, bg);
+	if (context.active) {
+		Ui::FillBackground(p, geometry, st::dialogsBgActive);
+	} else if (context.selected) {
+		Ui::FillBackground(p, geometry, st::dialogsBgOver);
+	} else {
+		p.fillRect(geometry, Ui::ResolveBackgroundBrush(p, bg));
+	}
 	if (!(flags & Flag::TopicJumpRipple)) {
 		auto ripple = context.active
 			? st::dialogsRippleBgActive

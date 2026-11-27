@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "ui/painter.h"
 #include "history/view/history_view_subsection_tabs.h"
 
 #include "apiwrap.h"
@@ -129,6 +130,13 @@ void SubsectionTabs::setup(not_null<Ui::RpWidget*> parent) {
 	}
 }
 
+void SubsectionTabs::setBackgroundSetup(Fn<void(not_null<Ui::RpWidget*>)> setup) {
+	_backgroundSetup = std::move(setup);
+	if (const auto widget = activeWidget()) {
+		_backgroundSetup(widget);
+	}
+}
+
 void SubsectionTabs::setupHorizontal(
 		not_null<QWidget*> parent,
 		bool bottom) {
@@ -221,6 +229,9 @@ void SubsectionTabs::setupHorizontal(
 		}
 	}, widget->lifetime());
 
+	if (_backgroundSetup) {
+		_backgroundSetup(widget);
+	}
 	_layoutRequests.fire({});
 
 	startFillingSlider(scroll, slider, false);
@@ -278,9 +289,12 @@ void SubsectionTabs::setupVertical(not_null<QWidget*> parent) {
 	}, scroll->lifetime());
 
 	_vertical->paintRequest() | rpl::on_next([=](QRect clip) {
-		QPainter(_vertical).fillRect(clip, st::windowBg);
+		Painter(_vertical).fillRect(clip, st::windowBg);
 	}, _vertical->lifetime());
 
+	if (_backgroundSetup) {
+		_backgroundSetup(_vertical);
+	}
 	_layoutRequests.fire({});
 
 	startFillingSlider(scroll, slider, true);

@@ -49,6 +49,39 @@ base::options::toggle OptionMessageTimeSeconds({
 	.name = "Show seconds in message time",
 });
 
+[[nodiscard]] QString MessageTime(QTime time) {
+	const auto locale = QLocale();
+	if (!base::options::value<bool>(kOptionMessageTimeSeconds)) {
+		return locale.toString(time, QLocale::ShortFormat);
+	}
+	// LongFormat can include a full localized time-zone name. Add seconds
+	// to the short clock format instead, keeping its 12/24-hour convention.
+	auto format = locale.timeFormat(QLocale::ShortFormat);
+	auto quoted = false;
+	auto minutesEnd = -1;
+	for (auto i = 0; i < format.size(); ++i) {
+		if (format[i] == QChar(0x27)) {
+			if (i + 1 < format.size() && format[i + 1] == QChar(0x27)) {
+				++i;
+			} else {
+				quoted = !quoted;
+			}
+		} else if (!quoted) {
+			if (format[i] == QChar('s')) {
+				return locale.toString(time, format);
+			} else if (format[i] == QChar('m')) {
+				minutesEnd = i + 1;
+			}
+		}
+	}
+	if (minutesEnd < 0) {
+		format = u"HH:mm:ss"_q;
+	} else {
+		format.insert(minutesEnd, u":ss"_q);
+	}
+	return locale.toString(time, format);
+}
+
 [[nodiscard]] QString SchedulePeriodText(TimeId period) {
 	struct Entry {
 		TimeId period = 0;
@@ -522,11 +555,7 @@ void BottomInfo::layoutDateText() {
 		: edited + ((_data.flags
 			& (Data::Flag::ForwardedDate | Data::Flag::FullDate))
 		? Ui::FormatDateTimeSavedFrom(_data.date)
-		: QLocale().toString(
-			_data.date.time(),
-			base::options::value<bool>(kOptionMessageTimeSeconds)
-				? QLocale::LongFormat
-				: QLocale::ShortFormat));
+		: MessageTime(_data.date.time()));
 	const auto afterAuthor = prefix + date;
 	const auto afterAuthorWidth = st::msgDateFont->width(afterAuthor);
 	const auto authorWidth = st::msgDateFont->width(author);

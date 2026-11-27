@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_main.h"
+#include "ui/painter.h"
 
 #include "settings/settings_common_session.h"
 
@@ -171,6 +172,9 @@ Cover::Cover(
 , _name(this, st::infoProfileCover.name)
 , _phone(this, st::defaultFlatLabel, st::popupMenuWithIcons)
 , _username(this, st::infoProfileMegagroupCover.status) {
+	paintRequest() | rpl::on_next([=](QRect clip) {
+		Painter(this).fillRect(clip, st::boxBg);
+	}, lifetime());
 	_user->updateFull();
 
 	_name->setSelectable(true);

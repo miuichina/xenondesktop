@@ -192,7 +192,7 @@ bool ContentWidget::isStackBottom() const {
 }
 
 void ContentWidget::paintEvent(QPaintEvent *e) {
-	auto p = QPainter(this);
+	auto p = Painter(this);
 	if (_paintPadding.isNull()) {
 		p.fillRect(e->rect(), _bg);
 	} else {

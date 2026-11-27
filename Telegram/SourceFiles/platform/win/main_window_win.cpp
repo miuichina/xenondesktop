@@ -21,7 +21,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/style/style_core_palette.h"
 #include "ui/window_palette.h"
 #include "ui/painter.h"
+#include "ui/image/image_prepare.h"
+#include <QtCore/QTimer>
+#include <map>
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_window.h"
 #include "base/platform/win/base_windows_wrl.h"
@@ -40,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QApplication>
 #include <QtGui/QWindow>
 #include <QtGui/QScreen>
+#include <QtGui/qscreen_platform.h>
 #include <QtCore/QOperatingSystemVersion>
 
 #include <Shobjidl.h>
@@ -69,43 +74,194 @@ namespace {
 // icon click (both left or right button) was made from the active app.
 constexpr auto kKeepActiveForTrayIcon = crl::time(500);
 
-constexpr auto kSystemBackdropAttribute = DWORD(38);
-constexpr auto kImmersiveDarkModeAttribute = DWORD(20);
-constexpr auto kAcrylicBackdrop = DWORD(3);
+constexpr auto kWallpaperRefreshDelay = crl::time(80);
 
-thread_local auto BackdropPaintOpacity = 1.;
+rpl::event_stream<> WallpaperPositionChanged;
 
-class AcrylicPalette final {
+thread_local QWidget *WallpaperPaintWidget = nullptr;
+thread_local auto WallpaperRasterPaint = false;
+thread_local auto WallpaperRasterTransform = QTransform();
+
+// QWidget geometry can lag behind WM_MOVE during the native move loop.
+QPoint WallpaperGlobalPosition(QWidget *widget) {
+	const auto top = widget->window();
+	// Hidden popup snapshots use the requested Qt position before the native
+	// popup has moved there. Only main-window dragging needs native coordinates.
+	if (!dynamic_cast<MainWindow*>(top)) {
+		return widget->mapToGlobal(QPoint());
+	}
+	auto point = POINT{};
+	// Never force native creation from WM_MOVE: Windows sends it while
+	// Qt is still constructing the platform window.
+	const auto hwnd = reinterpret_cast<HWND>(top->internalWinId());
+	const auto screen = top->screen();
+	const auto native = screen
+		? screen->nativeInterface<QNativeInterface::QWindowsScreen>() : nullptr;
+	auto monitor = MONITORINFO{ .cbSize = sizeof(MONITORINFO) };
+	if (!hwnd || !ClientToScreen(hwnd, &point) || !native
+		|| !GetMonitorInfo(native->handle(), &monitor)) {
+		return widget->mapToGlobal(QPoint());
+	}
+	const auto ratio = top->devicePixelRatioF();
+	return screen->geometry().topLeft() + QPoint(
+		qRound((point.x - monitor.rcMonitor.left) / ratio),
+		qRound((point.y - monitor.rcMonitor.top) / ratio))
+		+ widget->mapTo(top, QPoint());
+}
+
+class WallpaperBackground final {
 public:
-	void rebuild() {
-		const auto reset = style::main_palette::Override(nullptr);
-		auto &palette = _palettes[_index ^= 1];
-		palette = *style::main_palette::get();
-		palette.finalize();
-		const auto opacity = std::clamp(base::options::value<int>(
-			Window::kOptionWindowsBackgroundOpacity), 0, 100) / 100.;
-		for (const auto color : {
-			st::windowBg, st::windowBgOver, st::dialogsBg,
-			st::dialogsBgOver, st::boxBg, st::boxDividerBg,
-			st::historyComposeAreaBg, st::mainMenuBg, st::topBarBg,
-			st::titleBg, st::titleBgActive, st::contactsBg,
-			st::contactsBgOver, st::sideBarBg, st::introBg,
-			st::filterInputInactiveBg, st::filterInputActiveBg,
-		}) {
-			const auto &value = color->c;
-			palette.colorAtIndex(style::main_palette::indexOfColor(color)).set(
-				value.red(), value.green(), value.blue(),
-				uchar(base::SafeRound(value.alpha() * opacity)));
-		}
+	void invalidate() {
+		_loaded = false;
+		_image = QImage();
+		_tints.clear();
 	}
 
-	const style::palette *get() const {
-		return &_palettes[_index];
+	QBrush brush(QWidget *widget, QColor color, int minimumOpacity) {
+		if (base::options::value<int>(Window::kOptionWallpaperTintOpacity) >= 100) {
+			return QBrush(color);
+		}
+		if (!_loaded) {
+			rebuild();
+		}
+		if (_image.isNull()) {
+			return QBrush(color);
+		}
+		const auto opacity = std::max(minimumOpacity, std::clamp(
+			base::options::value<int>(Window::kOptionWallpaperTintOpacity), 0, 100));
+		const auto key = std::pair(color.rgba(), opacity);
+		auto i = _tints.find(key);
+		if (i == _tints.end()) {
+			auto image = _image.copy();
+			QPainter p(&image);
+			color.setAlphaF(opacity / 100.);
+			p.fillRect(image.rect(), color);
+			p.end();
+			i = _tints.emplace(key, QPixmap::fromImage(image)).first;
+		}
+		auto result = QBrush(i->second);
+		const auto origin = _geometry.topLeft() - WallpaperGlobalPosition(widget);
+		auto transform = QTransform();
+		transform.translate(origin.x(), origin.y());
+		transform.scale(
+			_geometry.width() / double(_image.width()),
+			_geometry.height() / double(_image.height()));
+		result.setTransform(transform);
+		return result;
 	}
 
 private:
-	style::palette _palettes[2];
-	int _index = 0;
+	void rebuild() {
+		_loaded = true;
+		Microsoft::WRL::ComPtr<IDesktopWallpaper> desktop;
+		if (FAILED(CoCreateInstance(CLSID_DesktopWallpaper, nullptr,
+				CLSCTX_ALL, IID_PPV_ARGS(&desktop)))) {
+			return;
+		}
+		_geometry = QRect();
+		for (const auto screen : QGuiApplication::screens()) {
+			_geometry = _geometry.united(screen->geometry());
+		}
+		if (_geometry.isEmpty()) {
+			return;
+		}
+		const auto blur = std::clamp(base::options::value<int>(
+			Window::kOptionWallpaperBlur), 0, 100);
+		// Small radii need the original detail; a quarter-size texture would
+		// impose four-pixel blocks even when almost no blur was requested.
+		const auto scale = (blur >= 16) ? 0.25 : (blur >= 8) ? 0.5 : 1.;
+		_image = QImage(QSize(
+			std::max(1, int(std::ceil(_geometry.width() * scale))),
+			std::max(1, int(std::ceil(_geometry.height() * scale)))),
+			QImage::Format_RGB32);
+		auto background = COLORREF(0);
+		desktop->GetBackgroundColor(&background);
+		_image.fill(QColor(GetRValue(background), GetGValue(background),
+			GetBValue(background)));
+		auto position = DWPOS_FILL;
+		desktop->GetPosition(&position);
+		auto count = UINT(0);
+		desktop->GetMonitorDevicePathCount(&count);
+		auto painted = false;
+		QPainter p(&_image);
+		p.setRenderHint(QPainter::SmoothPixmapTransform);
+		p.scale(scale, scale);
+		p.translate(-_geometry.topLeft());
+		for (const auto screen : QGuiApplication::screens()) {
+			const auto native = screen->nativeInterface<QNativeInterface::QWindowsScreen>();
+			auto monitor = MONITORINFO{ .cbSize = sizeof(MONITORINFO) };
+			if (!native || !GetMonitorInfo(native->handle(), &monitor)) {
+				continue;
+			}
+			for (auto index = UINT(0); index != count; ++index) {
+				auto path = LPWSTR(nullptr);
+				if (FAILED(desktop->GetMonitorDevicePathAt(index, &path))) {
+					continue;
+				}
+				auto rect = RECT{};
+				const auto bounds = desktop->GetMonitorRECT(path, &rect);
+				auto wallpaper = LPWSTR(nullptr);
+				if (SUCCEEDED(bounds) && EqualRect(&rect, &monitor.rcMonitor)) {
+					desktop->GetWallpaper(path, &wallpaper);
+				}
+				CoTaskMemFree(path);
+				if (!wallpaper) {
+					continue;
+				}
+				const auto source = QImage(QString::fromWCharArray(wallpaper));
+				CoTaskMemFree(wallpaper);
+				if (source.isNull()) {
+					break;
+				}
+				painted = true;
+				const auto area = QRectF(screen->geometry());
+				const auto target = (position == DWPOS_SPAN)
+					? QRectF(_geometry) : area;
+				p.save();
+				p.setClipRect(area);
+				if (position == DWPOS_TILE) {
+					const auto tile = QSizeF(source.size()) / screen->devicePixelRatio();
+					for (auto y = area.top(); y < area.bottom(); y += tile.height()) {
+						for (auto x = area.left(); x < area.right(); x += tile.width()) {
+							p.drawImage(QRectF(QPointF(x, y), tile), source);
+						}
+					}
+				} else {
+					auto size = QSizeF(source.size()) / screen->devicePixelRatio();
+					if (position == DWPOS_STRETCH) {
+						size = target.size();
+					} else if (position != DWPOS_CENTER) {
+						size.scale(target.size(), position == DWPOS_FIT
+							? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding);
+					}
+					p.drawImage(QRectF(target.center() - QPointF(
+						size.width() / 2, size.height() / 2), size), source);
+				}
+				p.restore();
+				break;
+			}
+		}
+		p.end();
+		if (!painted) {
+			_image = QImage();
+			return;
+		}
+		if (blur) {
+			_image = Images::BlurLargeImage(std::move(_image),
+				std::max(1, int(std::round(blur * scale))));
+		}
+		if (_image.size() != _geometry.size()) {
+			// Reconstruct once, rather than letting texture brushes enlarge it
+			// with nearest-neighbour sampling on every widget.
+			_image = _image.scaled(_geometry.size(), Qt::IgnoreAspectRatio,
+				Qt::SmoothTransformation);
+		}
+	}
+
+	bool _loaded = false;
+	QImage _image;
+	QRect _geometry;
+	std::map<std::pair<QRgb, int>, QPixmap> _tints;
 
 };
 
@@ -261,8 +417,20 @@ bool EventFilter::mainWindowEvent(
 		}
 	} return false;
 
+	case WM_SETTINGCHANGE:
+	case WM_DISPLAYCHANGE: {
+		_window->refreshWallpaper();
+	} return false;
+
+	case WM_ENTERSIZEMOVE: {
+		_window->repaintWallpaperPosition();
+	} return false;
+
 	case WM_MOVE: {
 		_window->positionUpdated();
+		if (Window::UseWallpaperBackdrop()) {
+			_window->repaintWallpaperPosition();
+		}
 	} return false;
 
 	case WM_DWMSENDICONICTHUMBNAIL: {
@@ -383,6 +551,10 @@ struct MainWindow::Private {
 	}
 
 	EventFilter filter;
+	WallpaperBackground wallpaper;
+	QTimer wallpaperRefresh;
+	bool wallpaperRepainting = false;
+	QPoint wallpaperPosition;
 	ComPtr<ViewManagement::IUIViewSettings> viewSettings;
 };
 
@@ -444,30 +616,26 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 	}, lifetime());
 
 	setupPreviewPasscodeLock();
-	if (testAttribute(Qt::WA_TranslucentBackground)) {
-		const auto palette = lifetime().make_state<AcrylicPalette>();
-		palette->rebuild();
-		Ui::SetWindowPalette(this, [=](bool) {
-			return property("xenonWindowsBackdrop").toBool() ? palette->get() : nullptr;
-		});
-		rpl::merge(
-			base::options::lookup<int>(Window::kOptionWindowsBackgroundOpacity).changes(),
-			style::PaletteChanged()
-		) | rpl::on_next([=] {
-			palette->rebuild();
-			Ui::ForceFullRepaint(this);
-		}, lifetime());
-		paintRequest() | rpl::on_next([=] {
-			if (property("xenonWindowsBackdrop").toBool()) {
-				Painter p(this);
-				p.setCompositionMode(QPainter::CompositionMode_Source);
-				p.fillRect(bodyWidget()->geometry(), Qt::transparent);
-				if (const auto title = titleWidget()) {
-					p.fillRect(title->geometry(), Qt::transparent);
-				}
-			}
-		}, lifetime());
-	}
+	_private->wallpaperRefresh.setSingleShot(true);
+	_private->wallpaperRefresh.setInterval(kWallpaperRefreshDelay);
+	QObject::connect(&_private->wallpaperRefresh, &QTimer::timeout, this, [=] {
+		_private->wallpaper.invalidate();
+		Ui::ForceFullRepaint(this);
+	});
+	rpl::merge(
+		base::options::lookup<bool>(Window::kOptionWallpaperBackdrop).changes(),
+		base::options::lookup<int>(Window::kOptionWallpaperBlur).changes(),
+		base::options::lookup<int>(Window::kOptionWallpaperTintOpacity).changes(),
+		style::PaletteChanged()
+	) | rpl::on_next([=] {
+		_private->wallpaperRefresh.start();
+	}, lifetime());
+	QObject::connect(qApp, &QGuiApplication::screenAdded, this, [=] {
+		refreshWallpaper();
+	});
+	QObject::connect(qApp, &QGuiApplication::screenRemoved, this, [=] {
+		refreshWallpaper();
+	});
 
 }
 
@@ -761,72 +929,180 @@ void MainWindow::initHook() {
 		Window::Theme::IsNightMode());
 }
 
-void EnsureWindowsAcrylic(QWidget *widget) {
-	if (!widget->isWindow()
-		|| dynamic_cast<Ui::PopupMenu*>(widget)
-		|| widget->property("xenonWindowsBackdrop").toBool()) {
-		return;
-	}
-	const auto parent = widget->parentWidget();
-	if (!parent || !parent->window()->property("xenonWindowsBackdrop").toBool()
-		|| !widget->testAttribute(Qt::WA_TranslucentBackground)) {
-		return;
-	}
-	const auto handle = reinterpret_cast<HWND>(widget->winId());
-	const auto material = kAcrylicBackdrop;
-	if (SUCCEEDED(DwmSetWindowAttribute(
-		handle, kSystemBackdropAttribute, &material, sizeof(material)))) {
-		const auto margins = MARGINS{ -1, -1, -1, -1 };
-		DwmExtendFrameIntoClientArea(handle, &margins);
-		widget->setProperty("xenonWindowsBackdrop", true);
-	}
+rpl::producer<> WallpaperPositionChanges() {
+	return WallpaperPositionChanged.events();
 }
 
-WindowsBackdropPaintScope::WindowsBackdropPaintScope(QWidget *widget)
-: _previous(BackdropPaintOpacity) {
-	BackdropPaintOpacity = widget->window()->property("xenonWindowsBackdrop").toBool()
-		? std::clamp(base::options::value<int>(
-			Window::kOptionWindowsBackgroundOpacity), 0, 100) / 100.
-		: 1.;
-}
-
-WindowsBackdropPaintScope::~WindowsBackdropPaintScope() {
-	BackdropPaintOpacity = _previous;
-}
-
-float64 WindowsBackdropPaintOpacity() {
-	return BackdropPaintOpacity;
-}
-
-void MainWindow::updateWindowsBackdrop() {
-	if (!_hWnd || !testAttribute(Qt::WA_TranslucentBackground)) {
+void MainWindow::repaintWallpaperPosition() {
+	if (!Window::UseWallpaperBackdrop() || _private->wallpaperRepainting
+		|| !psHwnd() || !isVisible()
+		|| !windowHandle() || !windowHandle()->handle()) {
 		return;
 	}
-	const auto material = kAcrylicBackdrop;
-	const auto result = DwmSetWindowAttribute(
-		_hWnd, kSystemBackdropAttribute, &material, sizeof(material));
-	const auto supported = SUCCEEDED(result);
-	setProperty("xenonWindowsBackdrop", supported);
-	for (const auto widget : findChildren<QWidget*>()) {
-		widget->setAttribute(Qt::WA_OpaquePaintEvent, false);
-	}
-	if (!supported) {
-		LOG(("Windows backdrop failed: %1").arg(qulonglong(result)));
-		Ui::ForceFullRepaint(this);
+	const auto position = WallpaperGlobalPosition(this);
+	if (_private->wallpaperPosition == position) {
 		return;
 	}
-	const auto dark = BOOL(Window::Theme::IsNightMode());
-	DwmSetWindowAttribute(
-		_hWnd,
-		kImmersiveDarkModeAttribute,
-		&dark,
-		sizeof(dark));
-	const auto margins = MARGINS{ -1, -1, -1, -1 };
-	DwmExtendFrameIntoClientArea(_hWnd, &margins);
+	_private->wallpaperPosition = position;
+	_private->wallpaperRepainting = true;
+	WallpaperPositionChanged.fire({});
+	// Invalidate Qt's backing store too: WM_PAINT alone may reuse its pixels.
+	for (const auto child : findChildren<QWidget*>()) {
+		if (child->isVisible()) {
+			child->update();
+		}
+	}
+	repaint();
+	_private->wallpaperRepainting = false;
+}
+
+void MainWindow::refreshWallpaper() {
+	_private->wallpaperRefresh.start();
+}
+
+QBrush MainWindow::wallpaperBrush(QWidget *widget, QColor color, int minimumOpacity) {
+	return _private->wallpaper.brush(widget, color, minimumOpacity);
+}
+
+namespace {
+
+MainWindow *WallpaperWindow(QWidget *widget) {
+	while (widget) {
+		if (const auto window = dynamic_cast<MainWindow*>(widget)) {
+			return window;
+		}
+		if (const auto parent = widget->parentWidget()) {
+			widget = parent;
+		} else {
+			const auto handle = widget->windowHandle();
+			const auto transient = handle ? handle->transientParent() : nullptr;
+			widget = transient ? QWidget::find(transient->winId()) : nullptr;
+		}
+	}
+	return nullptr;
+}
+
+QBrush ResolveWallpaperBrush(
+		const QPainter &p,
+		const QBrush &brush,
+		const style::color *source) {
+	if (WallpaperPaintWidget && source) {
+		const auto titleFill = source->get() == st::titleButtonBg.get()
+			|| source->get() == st::titleButtonBgActive.get()
+			|| source->get() == st::titleButtonCloseBg.get()
+			|| source->get() == st::titleButtonCloseBgActive.get();
+		if (titleFill) {
+			const auto window = WallpaperWindow(WallpaperPaintWidget);
+			const auto title = window ? window->titleWidget() : nullptr;
+			for (auto widget = WallpaperPaintWidget; widget; widget = widget->parentWidget()) {
+				if (widget == title && (Window::UseWallpaperBackdrop()
+					|| widget->property("chatBarBlurActive").toBool())) {
+					return QBrush(Qt::NoBrush);
+				}
+			}
+		}
+	}
+	if (!WallpaperPaintWidget || !Window::UseWallpaperBackdrop()
+		|| (!dynamic_cast<const QWidget*>(p.device()) && !WallpaperRasterPaint)) {
+		return brush;
+	}
+	// Dimming overlays must darken the wallpaper without introducing theme hue.
+	if (source && (source->get() == st::layerBg.get()
+		|| source->get() == st::slideFadeOutBg.get())) {
+		return QBrush(QColor(0, 0, 0, brush.color().alpha()));
+	}
+	const auto hover = [&] {
+		for (const auto color : { st::windowBgOver, st::dialogsBgOver,
+			st::contactsBgOver, st::menuBgOver,
+			st::dialogsBgActive, st::sideBarBgActive, st::lightButtonBgOver }) {
+			if ((source && source->get() == color.get())
+				|| (!source && brush.style() == Qt::SolidPattern
+					&& brush.color() == color->c)) {
+				return true;
+			}
+		}
+		return false;
+	}();
+	const auto background = [&] {
+		for (const auto color : {
+			st::windowBg, st::dialogsBg, st::boxBg, st::boxDividerBg,
+			st::historyComposeAreaBg, st::mainMenuBg, st::topBarBg,
+			st::titleBg, st::titleBgActive, st::contactsBg,
+			st::sideBarBg, st::introBg, st::menuBg,
+			st::emojiPanBg, st::emojiPanCategories, st::emojiPanHeaderBg,
+			st::historyPinnedBg, st::historyReplyBg, st::historyComposeButtonBg,
+			st::filterInputInactiveBg, st::filterInputActiveBg,
+			st::mentionBg, st::lightButtonBg, st::searchedBarBg,
+		}) {
+			if (source && source->get() == color.get()) {
+				return true;
+			}
+		}
+		return !source && brush.style() == Qt::SolidPattern
+			&& brush.color() == st::dialogsBg->c;
+	}();
+	if (!background && !hover) {
+		return brush;
+	}
+	const auto device = dynamic_cast<const QWidget*>(p.device());
+	const auto widget = device ? const_cast<QWidget*>(device) : WallpaperPaintWidget;
+	const auto window = WallpaperWindow(widget);
+	if (!window) {
+		return brush;
+	}
+	// Use one base tint across panels; preserve distinct hover/selection states.
+	auto result = window->wallpaperBrush(widget,
+		hover ? brush.color() : st::windowBg->c, hover ? 30 : 0);
+	result.setTransform(result.transform()
+		* (device ? QTransform() : WallpaperRasterTransform)
+		* p.worldTransform().inverted());
+	return result;
+}
+
+} // namespace
+
+WallpaperPaintScope::WallpaperPaintScope(
+		QWidget *widget,
+		bool raster,
+		QTransform transform)
+: _previous(WallpaperPaintWidget)
+, _previousRaster(WallpaperRasterPaint)
+, _previousTransform(WallpaperRasterTransform) {
+	WallpaperPaintWidget = widget;
+	WallpaperRasterPaint = raster;
+	WallpaperRasterTransform = transform;
+	Ui::BackgroundBrushOverride = &ResolveWallpaperBrush;
+	Ui::BackgroundRenderOverride = [](QWidget *widget, QTransform transform)
+			-> std::unique_ptr<Ui::BackgroundRenderScope> {
+		return std::make_unique<WallpaperPaintScope>(widget, true, transform);
+	};
+	Ui::BackgroundUsesDeviceCoordinates = [](QWidget *widget) {
+		return Window::UseWallpaperBackdrop() && WallpaperWindow(widget);
+	};
+}
+
+WallpaperPaintScope::~WallpaperPaintScope() {
+	WallpaperPaintWidget = _previous;
+	WallpaperRasterPaint = _previousRaster;
+	WallpaperRasterTransform = _previousTransform;
+}
+
+bool PaintWallpaperBackground(QPainter &p, QRect area, QColor tint) {
+	if (!WallpaperPaintWidget || !Window::UseWallpaperBackdrop()
+		|| (!dynamic_cast<const QWidget*>(p.device()) && !WallpaperRasterPaint)) {
+		return false;
+	}
+	const auto window = WallpaperWindow(WallpaperPaintWidget);
+	if (!window) {
+		return false;
+	}
+	auto brush = window->wallpaperBrush(WallpaperPaintWidget, st::windowBg->c);
+	brush.setTransform(brush.transform() * WallpaperRasterTransform * p.worldTransform().inverted());
+	p.fillRect(area, brush);
+	return true;
 }
 
 void MainWindow::validateWindowTheme(bool native, bool night) {
-	updateWindowsBackdrop();
 	if (!IsWindows8OrGreater()) {
 		const auto empty = native ? nullptr : L" ";
 		SetWindowTheme(_hWnd, empty, empty);

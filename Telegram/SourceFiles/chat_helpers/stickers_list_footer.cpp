@@ -723,6 +723,24 @@ void StickersListFooter::paintSelectionBg(
 void StickersListFooter::paintLeftRightFading(
 		QPainter &p,
 		const ExpandingContext &context) const {
+	const auto background = Ui::ResolveBackgroundBrush(p, st().categoriesBg, &st().categoriesBg);
+	const auto textured = background.style() == Qt::TexturePattern;
+	const auto paintFade = [&](const QImage &mask, QPoint position) {
+		if (!textured) {
+			p.drawImage(position, mask);
+			return;
+		}
+		auto image = mask.copy();
+		{
+			QPainter q(&image);
+			q.setCompositionMode(QPainter::CompositionMode_SourceIn);
+			auto brush = background;
+			brush.setTransform(brush.transform()
+				* QTransform::fromTranslate(-position.x(), -position.y()));
+			q.fillRect(QRectF(QPointF(), QSizeF(image.size()) / image.devicePixelRatio()), brush);
+		}
+		p.drawImage(position, image);
+	};
 	const auto o_left_normal = std::clamp(
 		_iconState.x.current() / st().fadeLeft.width(),
 		0.,
@@ -737,13 +755,13 @@ void StickersListFooter::paintLeftRightFading(
 		p.setOpacity(o_left);
 		const auto left = std::max(_iconsLeft, radiusSkip);
 		const auto top = _iconsTop;
-		if (left >= st::emojiPanRadius) {
+		if (left >= st::emojiPanRadius && !textured) {
 			st().fadeLeft.fill(
 				p,
 				QRect(left, top, st().fadeLeft.width(), st().footer));
 		} else {
 			validateFadeLeft(left + st().fadeLeft.width());
-			p.drawImage(0, _iconsTop, _fadeLeftCache);
+			paintFade(_fadeLeftCache, QPoint(0, _iconsTop));
 		}
 		p.setOpacity(1.);
 	}
@@ -758,7 +776,7 @@ void StickersListFooter::paintLeftRightFading(
 		p.setOpacity(o_right);
 		const auto right = std::max(_iconsRight, radiusSkip);
 		const auto rightWidth = right + st().fadeRight.width();
-		if (right >= st::emojiPanRadius) {
+		if (right >= st::emojiPanRadius && !textured) {
 			st().fadeRight.fill(
 				p,
 				QRect(
@@ -768,7 +786,7 @@ void StickersListFooter::paintLeftRightFading(
 					st().footer));
 		} else {
 			validateFadeRight(rightWidth);
-			p.drawImage(width() - rightWidth, _iconsTop, _fadeRightCache);
+			paintFade(_fadeRightCache, QPoint(width() - rightWidth, _iconsTop));
 		}
 		p.setOpacity(1.);
 	}

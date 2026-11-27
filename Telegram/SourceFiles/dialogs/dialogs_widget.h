@@ -270,7 +270,7 @@ private:
 	void updateJumpToDateVisibility(bool fast = false);
 	void updateSearchFromVisibility(bool fast = false);
 	void updateControlsGeometry();
-	QImage renderBlurBackdrop(QRect area);
+	QImage renderBlurBackdrop(QRect area, bool fullResolution = false);
 	void invalidateBlurBackdrop(bool contentChanged = true);
 	void refreshTopBars();
 	void showSearchInTopBar(anim::type animated);

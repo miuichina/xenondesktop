@@ -56,11 +56,13 @@ struct CounterLayerArgs {
 
 extern const char kOptionNewWindowsSizeAsFirst[];
 extern const char kOptionDisableTouchbar[];
-inline constexpr auto kOptionWindowsAcrylic = "xenon-windows-acrylic";
-inline constexpr auto kOptionWindowsBackgroundOpacity
-	= "xenon-windows-background-opacity";
+inline constexpr auto kOptionWallpaperBackdrop = "xenon-wallpaper-backdrop";
+inline constexpr auto kOptionWallpaperTintOpacity
+	= "xenon-wallpaper-tint-opacity";
 
-[[nodiscard]] bool UseWindowsAcrylic();
+inline constexpr auto kOptionWallpaperBlur = "xenon-wallpaper-blur";
+
+[[nodiscard]] bool UseWallpaperBackdrop();
 
 [[nodiscard]] QImage GenerateCounterLayer(CounterLayerArgs &&args);
 [[nodiscard]] QImage WithSmallCounter(QImage image, CounterLayerArgs &&args);

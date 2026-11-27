@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/cached_round_corners.h"
+#include "ui/round_rect.h"
+#include <QtGui/QPainterPath>
 #include "ui/chat/chat_style.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
@@ -113,6 +115,19 @@ void FinishCachedCorners() {
 void FillRoundRect(QPainter &p, int32 x, int32 y, int32 w, int32 h, style::color bg, const CornersPixmaps &corners) {
 	using namespace Images;
 
+	const auto brush = ResolveBackgroundBrush(p, bg, &bg);
+	if (brush.style() == Qt::TexturePattern) {
+		const auto radius = [&](int index) {
+			return corners.p[index].width() / style::DevicePixelRatio();
+		};
+		p.save();
+		p.setRenderHint(QPainter::Antialiasing);
+		p.fillPath(ComplexRoundedRectPath(QRect(x, y, w, h),
+			radius(kTopLeft), radius(kTopRight),
+			radius(kBottomLeft), radius(kBottomRight)), brush);
+		p.restore();
+		return;
+	}
 	const auto fillBg = [&](QRect rect) {
 		p.fillRect(rect, bg);
 	};

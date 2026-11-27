@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "ui/painter.h"
 #include "chat_helpers/message_field.h"
 
 #include "history/history_widget.h"
@@ -1360,7 +1361,7 @@ std::unique_ptr<Ui::RpWidget> TextErrorSendRestriction(
 		st::historySendPremiumRequired);
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
 	raw->paintRequest() | rpl::on_next([=](QRect clip) {
-		QPainter(raw).fillRect(clip, st::windowBg);
+		Painter(raw).fillRect(clip, st::windowBg);
 	}, raw->lifetime());
 	raw->sizeValue(
 	) | rpl::on_next([=](QSize size) {
@@ -1395,7 +1396,7 @@ std::unique_ptr<Ui::RpWidget> PremiumRequiredSendRestriction(
 		result.get(),
 		tr::lng_restricted_send_non_premium_more(tr::now));
 	raw->paintRequest() | rpl::on_next([=](QRect clip) {
-		QPainter(raw).fillRect(clip, st::windowBg);
+		Painter(raw).fillRect(clip, st::windowBg);
 	}, raw->lifetime());
 	raw->widthValue(
 	) | rpl::on_next([=](int width) {

@@ -101,6 +101,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_user_photos.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_chat.h"
+#include "styles/style_media_player.h"
 #include "styles/style_window.h"
 
 #include <QtCore/QCoreApplication>
@@ -956,6 +957,9 @@ void MainWidget::createPlayer() {
 			this,
 			object_ptr<Media::Player::Widget>(this, this, _controller),
 			_controller->adaptive().oneColumnValue());
+		_player->entity()->setupBlurBackground([=](not_null<Ui::RpWidget*> target) {
+			_history->setupBarBlur(target, st::mediaPlayerBg);
+		});
 		rpl::merge(
 			_player->heightValue() | rpl::map_to(true),
 			_player->shownValue()

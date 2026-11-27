@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
+#include "mainwindow.h"
 
 #include "history/view/history_view_message_shot.h"
 #include "history/view/history_view_top_bar_blur.h"
@@ -232,6 +233,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QWindow>
 #include <QtCore/QMimeData>
 
+#ifdef Q_OS_WIN
+#include "platform/win/main_window_win.h"
+#endif
+
 namespace {
 
 constexpr auto kMessagesPerPageFirst = 30;
@@ -420,7 +425,15 @@ HistoryWidget::HistoryWidget(
 		invalidateBlurBackdrop(false);
 	}, lifetime());
 	_topBar->setBlurBackdrop([=] { return blurBackdrop(); });
+#ifdef Q_OS_WIN
+	if (const auto title = controller->widget()->titleWidget()) {
+		setupBarBlur(title, st::topBarBg);
+	}
+#endif
 	rpl::merge(
+#ifdef Q_OS_WIN
+		Platform::WallpaperPositionChanges(),
+#endif
 		base::options::lookup<bool>(HistoryView::kOptionBlurEffects).changes(),
 		base::options::lookup<int>(HistoryView::kOptionBlurIntensity).changes()
 	) | rpl::on_next([=] {
@@ -3538,6 +3551,8 @@ void HistoryWidget::showHistory(
 				controller(),
 				_topBars.get(),
 				user);
+			setupBarBlur(_businessBotStatus->bar().backgroundWidget(),
+				st::historyContactStatusButton.bgColor);
 			_businessBotStatus->bar().heightValue(
 			) | rpl::on_next([=] {
 				updateControlsGeometry();
@@ -10107,6 +10122,7 @@ void HistoryWidget::setupTranslateBar() {
 		_topBars.get(),
 		controller(),
 		_history);
+	setupBarBlur(_translateBar->backgroundWidget(), st::historyComposeButtonBg);
 
 	controller()->adaptive().oneColumnValue(
 	) | rpl::on_next([=, raw = _translateBar.get()](bool one) {
@@ -10890,6 +10906,11 @@ void HistoryWidget::validateSubsectionTabs() {
 			this,
 			_history);
 	}
+	_subsectionTabs->setBackgroundSetup([weak = base::make_weak(this)](not_null<Ui::RpWidget*> widget) {
+		if (const auto that = weak.get()) {
+			that->setupBarBlur(widget, st::windowBg);
+		}
+	});
 	_subsectionTabs->removeRequests() | rpl::on_next([=] {
 		_subsectionTabsLifetime.destroy();
 		_subsectionTabs = nullptr;
@@ -11863,7 +11884,13 @@ void HistoryWidget::drawField(
 	p.setInactive(
 		controller()->isGifPausedAtLeastFor(Window::GifPauseReason::Any));
 	if (background) {
+#ifdef Q_OS_WIN
+		if (!Platform::PaintWallpaperBackground(p, area, st::windowBg->c)) {
+			p.fillRect(area, st::historyReplyBg);
+		}
+#else
 		p.fillRect(area, st::historyReplyBg);
+#endif
 		if (base::options::value<bool>(HistoryView::kOptionBlurEffects)
 			&& _field->isVisible() && !isRecording()) {
 			if (_composeBlurBackdrop.isNull()) {
@@ -12136,7 +12163,68 @@ bool HistoryWidget::paintShowAnimationFrame() {
 	return false;
 }
 
+void HistoryWidget::setupBarBlur(not_null<Ui::RpWidget*> target, const style::color &tint) {
+	if (target->property("chatBarBlurInstalled").toBool()) {
+		return;
+	}
+	target->setProperty("chatBarBlurInstalled", true);
+	// A separate background child works for bars with custom paintEvent
+	// implementations as well as reactive paint handlers.
+	const auto background = Ui::CreateChild<Ui::RpWidget>(target);
+	background->setAttribute(Qt::WA_TransparentForMouseEvents);
+	background->setFocusPolicy(Qt::NoFocus);
+	background->lower();
+	const auto weak = base::make_weak(this);
+	const auto blur = background->lifetime().make_state<HistoryView::BlurBackground>(
+		background,
+		[=] {
+			const auto that = weak.get();
+			if (!that) {
+				return QImage();
+			}
+			auto area = QRect(
+				that->mapFromGlobal(background->mapToGlobal(QPoint())),
+				background->size());
+			if (target == that->controller()->widget()->titleWidget()) {
+				// Above the chat there are no message pixels to sample. Continue
+				// the header's backdrop instead of showing an unrelated flat strip.
+				area.moveTop(that->_topBar->mapTo(that, QPoint()).y());
+			}
+			return that->renderBlurBackdrop(area);
+		},
+		[=] { return tint->c; });
+	target->geometryValue() | rpl::on_next([=] {
+		background->setGeometry(target->rect());
+		blur->invalidate();
+	}, background->lifetime());
+	_barBlurUpdates.events() | rpl::on_next([=] {
+		blur->invalidate();
+	}, background->lifetime());
+	geometryValue() | rpl::on_next([=] {
+		blur->invalidate();
+	}, background->lifetime());
+	rpl::merge(
+		rpl::single(rpl::empty_value()),
+		base::options::lookup<bool>(HistoryView::kOptionBlurEffects).changes(),
+		style::PaletteChanged()
+#ifdef Q_OS_WIN
+		, base::options::lookup<bool>(Window::kOptionWallpaperBackdrop).changes()
+#endif
+	) | rpl::on_next([=] {
+		const auto enabled = base::options::value<bool>(HistoryView::kOptionBlurEffects)
+#ifdef Q_OS_WIN
+			|| Window::UseWallpaperBackdrop()
+#endif
+			;
+		target->setProperty("chatBarBlurActive", enabled);
+		background->setVisible(enabled);
+		target->update();
+		blur->invalidate();
+	}, background->lifetime());
+}
+
 void HistoryWidget::invalidateBlurBackdrop(bool contentChanged) {
+	_barBlurUpdates.fire({});
 	if (contentChanged) {
 		for (auto &cache : _blurContentCache) {
 			cache.invalidate();
@@ -12180,6 +12268,10 @@ QImage HistoryWidget::renderBlurBackdrop(QRect area) {
 			image.width() / float64(area.width()),
 			image.height() / float64(bandHeight));
 		p.translate(-area.x(), padding - area.y());
+#ifdef Q_OS_WIN
+		const auto wallpaperScope = Platform::WallpaperPaintScope(
+			this, true, p.worldTransform());
+#endif
 		const auto clip = area.adjusted(0, -padding, 0, padding);
 		Window::SectionWidget::PaintBackground(
 			p,
@@ -12192,6 +12284,10 @@ QImage HistoryWidget::renderBlurBackdrop(QRect area) {
 		p.setClipRect(clip.translated(-origin));
 		auto &cache = _blurContentCache[area.center().y() < height() / 2 ? 0 : 1];
 		cache.paint(p, clip.translated(-origin), scale, [&](Painter &p, QRect area) {
+#ifdef Q_OS_WIN
+			const auto wallpaperScope = Platform::WallpaperPaintScope(
+				_list, true, p.worldTransform());
+#endif
 			_list->paintBackdrop(p, area);
 		});
 	}
@@ -12209,7 +12305,11 @@ void HistoryWidget::updateComposeBlur() {
 		_composeBlurBackdrop = QImage();
 	}
 	_tabbedSelectorToggle->setBackgroundVisible(!enabled);
-	const auto transparent = enabled;
+	const auto transparent = enabled
+#ifdef Q_OS_WIN
+		|| Window::UseWallpaperBackdrop()
+#endif
+		;
 	_fieldStyle->textBg = transparent ? st::transparent : st::historyComposeAreaBg;
 	_fieldStyle->textBgActive = _fieldStyle->textBg;
 	_field->setAttribute(Qt::WA_OpaquePaintEvent, !transparent);

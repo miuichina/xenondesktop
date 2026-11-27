@@ -37,6 +37,7 @@ public:
 	void hide();
 	void raise();
 	void finishAnimating();
+	[[nodiscard]] Ui::RpWidget *backgroundWidget() { return _wrap.entity(); }
 
 	void setShadowGeometryPostprocess(Fn<QRect(QRect)> postprocess);
 

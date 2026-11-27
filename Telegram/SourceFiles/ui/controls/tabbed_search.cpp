@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat_helpers.h"
 
 #include <QtGui/QStyleHints>
+#include <QtGui/QPainterPath>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QStyle>
@@ -614,11 +615,23 @@ void SearchWithGroups::initEdges() {
 		}
 		edge->paintRequest(
 		) | rpl::on_next([=] {
+			auto painter = QPainter(edge);
+			const auto brush = Ui::ResolveBackgroundBrush(painter, _st.outer, &_st.outer);
+			if (brush.style() == Qt::TexturePattern) {
+				auto outside = QPainterPath();
+				outside.addRect(QRectF(edge->rect()));
+				auto pill = QPainterPath();
+				pill.addRoundedRect(QRectF(rect().translated(-edge->pos())),
+					height() / 2., height() / 2.);
+				painter.setRenderHint(QPainter::Antialiasing);
+				painter.fillPath(outside.subtracted(pill), brush);
+				return;
+			}
 			const auto ratio = edge->devicePixelRatioF();
 			ensureRounding(height(), ratio);
 			const auto size = _rounding.height();
 			const auto half = size / 2;
-			QPainter(edge).drawImage(
+			painter.drawImage(
 				QPoint(),
 				_rounding,
 				QRect(left ? 0 : _rounding.width() - half, 0, half, size));

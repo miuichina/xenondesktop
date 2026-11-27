@@ -68,6 +68,7 @@ public:
 	void extractToParent(not_null<Ui::RpWidget*> parent);
 
 	void setBoundingRect(QRect boundingRect);
+	void setBackgroundSetup(Fn<void(not_null<Ui::RpWidget*>)> setup);
 	[[nodiscard]] rpl::producer<> layoutRequests() const;
 	[[nodiscard]] int leftSkip() const;
 	[[nodiscard]] int topSkip() const;
@@ -92,6 +93,7 @@ private:
 			const Item &) = default;
 	};
 
+	Fn<void(not_null<Ui::RpWidget*>)> _backgroundSetup;
 	void track();
 	void setupHorizontal(not_null<QWidget*> parent, bool bottom);
 	void setupVertical(not_null<QWidget*> parent);

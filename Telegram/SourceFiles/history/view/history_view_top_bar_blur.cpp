@@ -58,7 +58,8 @@ struct GlassUniforms {
 	float flip = 0.f;
 	float opacity = 1.f;
 	float fade = 1.f;
-	float padding[3] = {};
+	float preserveAlpha = 0.f;
+	float padding[2] = {};
 };
 
 static_assert(sizeof(BlurUniforms) == 528);
@@ -314,6 +315,7 @@ void BlurRenderer::render(
 		textureFlip,
 		frame.backdropOpacity,
 		frame.fade,
+		frame.original.isNull() ? 0.f : 1.f,
 	};
 	updates->updateDynamicBuffer(_glass.uniforms.get(), 0, sizeof(glass), &glass);
 	const auto stale = (_backdropKey != frame.backdrop.cacheKey())
@@ -422,6 +424,12 @@ void BlurBackdropCache::paint(
 	if (area.isEmpty()) {
 		return;
 	}
+#ifdef Q_OS_WIN
+	if (Window::UseWallpaperBackdrop()) {
+		render(p, area);
+		return;
+	}
+#endif
 	auto image = _image;
 	auto bounds = _area;
 	if (image.isNull() || _scale != scale
@@ -514,10 +522,12 @@ TopBarBlurFrame MakeBlurFrame(
 		* std::clamp(base::options::value<int>(kOptionBlurIntensity), 1, 200)
 		/ 100. * strength);
 	tint.setAlphaF(tintOpacity >= 0.f ? tintOpacity : st::topBarBlurTintOpacity);
-	auto opacity = 1.f;
 #ifdef Q_OS_WIN
-	opacity = float(Platform::WindowsBackdropPaintOpacity());
+	if (Window::UseWallpaperBackdrop() && tintOpacity < 0.f) {
+		tint.setAlphaF(0.);
+	}
 #endif
+	auto opacity = 1.f;
 	return {
 		.backdrop = std::move(backdrop),
 		.foreground = std::move(foreground),
@@ -548,13 +558,15 @@ void PaintBlurBackdrop(
 		backdrop = Images::BlurLargeImage(std::move(backdrop), radius);
 	}
 	p.save();
-#ifdef Q_OS_WIN
-	p.setOpacity(p.opacity() * Platform::WindowsBackdropPaintOpacity());
-#endif
 	p.setRenderHint(QPainter::SmoothPixmapTransform);
 	p.drawImage(area, backdrop, QRectF(
 		0, padding * factor, backdrop.width(), area.height() * factor));
 	tint.setAlphaF(tintOpacity >= 0.f ? tintOpacity : st::topBarBlurTintOpacity);
+#ifdef Q_OS_WIN
+	if (Window::UseWallpaperBackdrop() && tintOpacity < 0.f) {
+		tint.setAlphaF(0.);
+	}
+#endif
 	p.fillRect(area, tint);
 	p.restore();
 }
@@ -691,6 +703,11 @@ BlurBackground::BlurBackground(
 , _tint(std::move(tint))
 , _tintOpacity(tintOpacity)
 , _strength(std::move(strength)) {
+#ifdef Q_OS_WIN
+	Platform::WallpaperPositionChanges() | rpl::on_next([=] {
+		invalidate();
+	}, _lifetime);
+#endif
 	_target->paintRequest() | rpl::on_next([=] { paint(); }, _lifetime);
 	_target->sizeValue() | rpl::on_next([=] { invalidate(); }, _lifetime);
 	rpl::merge(
@@ -709,6 +726,19 @@ void BlurBackground::invalidate() {
 }
 
 void BlurBackground::paint() {
+#ifdef Q_OS_WIN
+	if (Window::UseWallpaperBackdrop() && !_strength
+		&& !base::options::value<bool>(kOptionBlurEffects)) {
+		// Wallpaper-only mode uses the preblurred desktop texture. When chat
+		// blur is enabled, keep rendering messages behind pinned and other bars.
+		if (_surface) {
+			_surface->rpWidget()->hide();
+		}
+		Painter p(_target);
+		Platform::PaintWallpaperBackground(p, _target->rect(), _tint());
+		return;
+	}
+#endif
 	const auto enabled = base::options::value<bool>(kOptionBlurEffects);
 	if (enabled && _image.isNull()) {
 		_image = _backdrop();
@@ -724,16 +754,20 @@ void BlurBackground::paint() {
 		}
 	}
 	const auto shown = enabled && !_image.isNull();
+	const auto rasterOnly = !_target->mask().isEmpty();
+	if (rasterOnly && _surface) {
+		_surface.reset();
+	}
 	if (_strength) {
-		const auto translucent = _target->window()->property("xenonWindowsBackdrop").toBool();
-		_target->setAttribute(Qt::WA_OpaquePaintEvent, shown && !translucent);
+		_target->setAttribute(Qt::WA_OpaquePaintEvent, shown);
 	}
 	if (shown && !_surface && !_failed && !_surfacePending
-		&& !IsBlurSnapshotActive()) {
+		&& !rasterOnly && !IsBlurSnapshotActive()) {
 		_surfacePending = true;
 		crl::on_main(this, [=] {
 			_surfacePending = false;
-			if (base::options::value<bool>(kOptionBlurEffects)) {
+			if (base::options::value<bool>(kOptionBlurEffects)
+				&& _target->mask().isEmpty()) {
 				createSurface();
 				_target->update();
 			}
@@ -744,9 +778,6 @@ void BlurBackground::paint() {
 		_surface->rpWidget()->setVisible(shown);
 		const auto tint = _tint();
 		auto opacity = 1.;
-#ifdef Q_OS_WIN
-		opacity = Platform::WindowsBackdropPaintOpacity();
-#endif
 		const auto fade = _strength ? _strength() : 1.f;
 		if (shown && (_surfaceImageKey != _image.cacheKey()
 			|| _surfaceTint != tint || _surfaceOpacity != opacity
@@ -761,9 +792,6 @@ void BlurBackground::paint() {
 		const auto tint = _tint();
 		const auto ratio = _target->devicePixelRatioF();
 		auto opacity = 1.;
-#ifdef Q_OS_WIN
-		opacity = Platform::WindowsBackdropPaintOpacity();
-#endif
 		const auto strength = _strength ? _strength() : 1.f;
 		if (_raster.isNull() || _rasterTint != tint
 			|| _rasterOpacity != opacity || _rasterStrength != strength
@@ -784,6 +812,14 @@ void BlurBackground::paint() {
 				tint,
 				_tintOpacity,
 				strength);
+			if (_strength && !_original.isNull()) {
+				p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+				const auto padding = st::topBarBlurRadius;
+				const auto factor = _original.height()
+					/ float64(_target->height() + 2 * padding);
+				p.drawImage(_target->rect(), _original, QRectF(0,
+					padding * factor, _original.width(), _target->height() * factor));
+			}
 		}
 		Painter p(_target);
 		if (_strength) {

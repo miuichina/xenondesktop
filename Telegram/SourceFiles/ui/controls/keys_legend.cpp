@@ -164,7 +164,9 @@ void PaintCap(QPainter &p, const Cap &cap, int x, int y, const St &st) {
 	p.setLayoutDirection(Qt::LeftToRight);
 	p.drawText(
 		rect.adjusted(st.capPadding, 0, -st.capPadding, 0),
-		Qt::AlignCenter | Qt::TextWordWrap,
+		Qt::AlignCenter | ((height <= st.capHeight && !cap.text.contains(u'\n'))
+			? Qt::TextSingleLine
+			: Qt::TextWordWrap),
 		cap.text);
 	p.setLayoutDirection(direction);
 }

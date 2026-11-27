@@ -395,7 +395,7 @@ void BottomControls::setupAboutHiddenAuthor() {
 	}
 	_aboutHiddenAuthor = std::make_unique<Ui::RpWidget>(this);
 	_aboutHiddenAuthor->paintRequest() | rpl::on_next([=] {
-		auto p = QPainter(_aboutHiddenAuthor.get());
+		auto p = Painter(_aboutHiddenAuthor.get());
 		auto rect = _aboutHiddenAuthor->rect();
 
 		p.fillRect(rect, st::historyReplyBg);

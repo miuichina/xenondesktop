@@ -349,7 +349,7 @@ Ui::RpWidget *SetupTabBarBackground(
 	const auto inner = bar->entity();
 	inner->paintRequest(
 	) | rpl::on_next([=, &bg, &roundEdges] {
-		auto p = QPainter(inner);
+		auto p = Painter(inner);
 		auto hq = PainterHighQualityEnabler(p);
 		const auto radius = roundEdges ? st::boxRadius : 0;
 		p.setPen(Qt::NoPen);
@@ -2127,7 +2127,8 @@ void TopBar::paintEdges(
 
 void TopBar::paintEdges(QPainter &p, const QRect &clip) const {
 	if (!_solidBg) {
-		paintEdges(p, clip, st::boxDividerBg);
+		paintEdges(p, clip, Ui::ResolveBackgroundBrush(
+			p, st::boxDividerBg, &st::boxDividerBg));
 	} else {
 		paintEdges(p, clip, *_solidBg);
 	}

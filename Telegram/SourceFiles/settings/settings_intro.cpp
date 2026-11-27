@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_intro.h"
+#include "ui/painter.h"
 
 #include "settings/sections/settings_advanced.h"
 #include "settings/sections/settings_main.h"
@@ -165,7 +166,7 @@ void TopBar::updateControlsGeometry(int newWidth) {
 
 void TopBar::paintEvent(QPaintEvent *e) {
 	const auto radius = st::boxRadius;
-	QPainter(this).fillRect(
+	Painter(this).fillRect(
 		e->rect().intersected({ 0, radius, width(), height() - radius }),
 		_st.bg);
 }
@@ -232,7 +233,7 @@ IntroWidget::IntroWidget(
 	_wrap->setAttribute(Qt::WA_OpaquePaintEvent);
 	_wrap->paintRequest(
 	) | rpl::on_next([=](QRect clip) {
-		auto p = QPainter(_wrap.data());
+		auto p = Painter(_wrap.data());
 		p.fillRect(clip, st::boxBg);
 	}, _wrap->lifetime());
 
@@ -539,10 +540,11 @@ void LayerWidget::doSetInnerFocus() {
 }
 
 void LayerWidget::paintEvent(QPaintEvent *e) {
-	auto p = QPainter(this);
+	auto p = Painter(this);
 
 	auto clip = e->rect();
 	auto r = st::boxRadius;
+	p.fillRect(clip.intersected(QRect(0, r, width(), height() - 2 * r)), st::boxBg);
 	const auto &pixmaps = Ui::CachedCornerPixmaps(Ui::BoxCorners);
 	if (!_tillTop && clip.intersects({ 0, 0, width(), r })) {
 		Ui::FillRoundRect(p, 0, 0, width(), r, st::boxBg, {

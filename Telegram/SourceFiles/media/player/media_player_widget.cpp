@@ -279,10 +279,18 @@ void Widget::hideDropdowns(not_null<Ui::RpWidget*> except) {
 	}
 }
 
+void Widget::setupBlurBackground(Fn<void(not_null<Ui::RpWidget*>)> setup) {
+	setup(this);
+	setup(rightControls());
+}
+
 void Widget::setupRightControls() {
 	const auto raw = rightControls();
 	raw->paintRequest(
 	) | rpl::on_next([=](QRect clip) {
+		if (raw->property("chatBarBlurActive").toBool()) {
+			return;
+		}
 		auto p = QPainter(raw);
 		const auto &icon = st::mediaPlayerControlsFade;
 		const auto fade = QRect(0, 0, icon.width(), raw->height());

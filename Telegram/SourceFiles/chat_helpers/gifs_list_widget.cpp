@@ -1094,7 +1094,7 @@ void GifsListWidget::setupCollections() {
 		const auto &margin = st().searchMargin;
 		bar->setGeometry(
 			margin.left(),
-			_search->height() + margin.top(),
+			_search->height() - margin.bottom() + margin.top(),
 			std::max(width - margin.left() - margin.right(), 0),
 			st().search.height);
 	}, lifetime());
@@ -1122,9 +1122,13 @@ void GifsListWidget::refreshCollectionButtons() {
 	const auto &collections = stickers.gifCollections();
 	const auto defaultId = stickers.defaultGifCollectionId();
 	const auto height = _search->height();
+	const auto collectionTop = height - st().searchMargin.bottom() + st().searchMargin.top();
+	const auto contentTop = collections.empty()
+		? height
+		: collectionTop + st().search.height + st().searchMargin.top();
 	_mosaic.setPadding(st::gifsPadding + QMargins(
 		-st::emojiPanRadius,
-		height * (collections.empty() ? 1 : 2),
+		contentTop,
 		0,
 		0));
 	_collectionBar->setVisible(!collections.empty());

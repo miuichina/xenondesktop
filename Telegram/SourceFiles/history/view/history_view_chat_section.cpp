@@ -145,6 +145,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <limits>
 #include <QtCore/QMimeData>
 
+#ifdef Q_OS_WIN
+#include "platform/win/main_window_win.h"
+#endif
+
 namespace HistoryView {
 
 namespace {
@@ -586,6 +590,9 @@ ChatWidget::ChatWidget(
 		invalidateBlurBackdrop();
 	}, lifetime());
 	rpl::merge(
+#ifdef Q_OS_WIN
+		Platform::WallpaperPositionChanges(),
+#endif
 		base::options::lookup<bool>(kOptionBlurEffects).changes(),
 		base::options::lookup<int>(kOptionBlurIntensity).changes()
 	) | rpl::on_next([=] {
@@ -5021,6 +5028,10 @@ QImage ChatWidget::renderBlurBackdrop(QRect area) {
 			image.width() / float64(area.width()),
 			image.height() / float64(bandHeight));
 		p.translate(-area.x(), padding - area.y());
+#ifdef Q_OS_WIN
+		const auto wallpaperScope = Platform::WallpaperPaintScope(
+			this, true, p.worldTransform());
+#endif
 		const auto clip = area.adjusted(0, -padding, 0, padding);
 		Window::SectionWidget::PaintBackground(
 			p,
@@ -5033,6 +5044,10 @@ QImage ChatWidget::renderBlurBackdrop(QRect area) {
 		p.setClipRect(clip.translated(-origin));
 		auto &cache = _blurContentCache[area.center().y() < height() / 2 ? 0 : 1];
 		cache.paint(p, clip.translated(-origin), scale, [&](Painter &p, QRect area) {
+#ifdef Q_OS_WIN
+			const auto wallpaperScope = Platform::WallpaperPaintScope(
+				_inner, true, p.worldTransform());
+#endif
 			_inner->paintBackdrop(p, area);
 		});
 	}

@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/emoji_config.h"
 #include "ui/ui_utility.h"
 #include "ui/painter.h"
+#include <QtGui/QPainterPath>
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_instance.h"
 #include "core/sandbox.h"
@@ -110,6 +111,12 @@ LayerBlur::LayerBlur(
 	}
 	return _transition.animating(now);
 }) {
+#ifdef Q_OS_WIN
+	Platform::WallpaperPositionChanges() | rpl::on_next([=] {
+		refreshBackdrop();
+		_widget.update();
+	}, _lifetime);
+#endif
 	_widget.setAttribute(Qt::WA_TransparentForMouseEvents);
 	_widget.setFocusPolicy(Qt::NoFocus);
 	_widget.hide();
@@ -144,7 +151,18 @@ void LayerBlur::update() {
 	const auto now = crl::now();
 	const auto shown = _layer->canSetFocus();
 	const auto enabled = base::options::value<bool>(HistoryView::kOptionBlurEffects);
-	if (enabled || _layer->window()->property("xenonWindowsBackdrop").toBool()) {
+	if (const auto window = dynamic_cast<Ui::RpWindow*>(_widget.window())) {
+		const auto radius = window->manualRoundingRadius();
+		if (radius > 0) {
+			auto path = QPainterPath();
+			path.addRoundedRect(QRectF(window->rect().translated(
+				-_widget.mapTo(window, QPoint()))), radius, radius);
+			_widget.setMask(QRegion(path.toFillPolygon().toPolygon()));
+		} else {
+			_widget.clearMask();
+		}
+	}
+	if (enabled) {
 		_layer->removeBodyCache();
 	}
 	const auto changed = (_transition.shown() != shown);
@@ -249,7 +267,7 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 		Ui::ForceFullRepaint(this);
 	}, lifetime());
 
-	setAttribute(Qt::WA_OpaquePaintEvent, !Window::UseWindowsAcrylic());
+	setAttribute(Qt::WA_OpaquePaintEvent);
 }
 
 void MainWindow::initHook() {

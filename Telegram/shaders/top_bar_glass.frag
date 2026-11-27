@@ -11,11 +11,13 @@ layout(std140, binding = 0) uniform Params {
 	float flip;
 	float backdropOpacity;
 	float fade;
+	float preserveAlpha;
 };
 
 void main() {
 	vec2 uv = vec2(v_texcoord.x, crop.x + v_texcoord.y * crop.y);
 	vec4 sharp = texture(original, uv);
+	float sourceAlpha = sharp.a;
 	sharp *= min(1.0, backdropOpacity / max(sharp.a, 0.00001));
 	uv.y = mix(uv.y, 1.0 - uv.y, flip);
 	vec4 bg = texture(backdrop, uv) * (1.0 - tint.a)
@@ -23,4 +25,5 @@ void main() {
 	bg *= min(1.0, backdropOpacity / max(bg.a, 0.00001));
 	vec4 fg = texture(foreground, v_texcoord);
 	fragColor = mix(sharp, fg + bg * (1.0 - fg.a), fade);
+	fragColor *= mix(1.0, sourceAlpha, preserveAlpha);
 }

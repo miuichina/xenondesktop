@@ -168,6 +168,7 @@ public:
 		not_null<Window::SessionController*> controller);
 
 	void historyLoaded();
+	void setupBarBlur(not_null<Ui::RpWidget*> target, const style::color &tint);
 
 	[[nodiscard]] bool preventsClose(Fn<void()> &&continueCallback) const;
 
@@ -902,6 +903,7 @@ private:
 	int _supportPreloadRequest = 0; // Not real mtpRequestId.
 
 	object_ptr<HistoryView::TopBarWidget> _topBar;
+	rpl::event_stream<> _barBlurUpdates;
 	QImage _blurBackdrop;
 	std::array<HistoryView::BlurBackdropCache, 2> _blurContentCache;
 	QImage _composeBlurBackdrop;

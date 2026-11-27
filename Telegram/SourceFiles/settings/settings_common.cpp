@@ -574,7 +574,7 @@ SeparatedToggle AddSeparatedToggle(
 	const auto separator = Ui::CreateChild<Ui::RpWidget>(container);
 	separator->paintRequest(
 	) | rpl::on_next([=, bg = st.textBgOver] {
-		auto p = QPainter(separator);
+		auto p = Painter(separator);
 		p.fillRect(separator->rect(), bg);
 	}, separator->lifetime());
 	const auto separatorHeight = 2 * st.toggle.border + st.toggle.diameter;

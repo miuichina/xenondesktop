@@ -396,9 +396,9 @@ void SectionWidget::PaintBackground(
 		QRect clip,
 		bool paused) {
 #ifdef Q_OS_WIN
-	p.save();
-	const auto restore = gsl::finally([&] { p.restore(); });
-	p.setOpacity(p.opacity() * Platform::WindowsBackdropPaintOpacity());
+	if (Platform::PaintWallpaperBackground(p, clip, st::windowBg->c)) {
+		return;
+	}
 #endif
 	const auto opacity = p.opacity();
 	const auto &background = theme->background();

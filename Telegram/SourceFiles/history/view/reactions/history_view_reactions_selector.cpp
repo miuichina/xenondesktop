@@ -563,6 +563,19 @@ int Selector::countAppearedWidth(float64 progress) const {
 	return anim::interpolate(_skipx * 2 + _size, _inner.width(), progress);
 }
 
+void Selector::paintWallpaperBackground(QPainter &p, QRect area, float64 radius) {
+	const auto brush = Ui::ResolveBackgroundBrush(p, _st.bg, &_st.bg);
+	if (brush.style() != Qt::TexturePattern) {
+		return;
+	}
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setPen(Qt::NoPen);
+	p.setBrush(brush);
+	p.drawRoundedRect(QRectF(area), radius, radius);
+	p.restore();
+}
+
 void Selector::paintAppearing(QPainter &p) {
 	Expects(_strip != nullptr);
 
@@ -573,6 +586,12 @@ void Selector::paintAppearing(QPainter &p) {
 	}
 	_paintBuffer.fill(_st.bg->c);
 	auto q = QPainter(&_paintBuffer);
+	{
+		const auto transform = QTransform::fromTranslate(-_outer.x(), -_outer.y());
+		const auto scope = Ui::BackgroundRenderOverride
+			? Ui::BackgroundRenderOverride(this, transform) : nullptr;
+		Ui::FillBackground(q, QRect(QPoint(), _outerWithBubble.size()), _st.bg);
+	}
 	const auto margins = marginsForShadow();
 	const auto appearedWidth = countAppearedWidth(_appearProgress);
 	const auto fullWidth = _inner.x() + appearedWidth + margins.right();
@@ -680,6 +699,8 @@ void Selector::paintCollapsed(QPainter &p) {
 	} else {
 		p.fillRect(_outer.marginsRemoved(marginsForShadow()), _st.bg);
 	}
+	paintWallpaperBackground(p,
+		_outer.marginsRemoved(marginsForShadow()), _inner.height() / 2.);
 	_strip->paint(
 		p,
 		_inner.topLeft() + QPoint(_skipx, _skipy - skipYBubbleUpShift()),
@@ -788,6 +809,7 @@ void Selector::paintExpandingBg(QPainter &p, const ExpandingRects &rects) {
 	} else {
 		paintNonTransparentExpandRect(p, rects.outer - marginsForShadow());
 	}
+	paintWallpaperBackground(p, rects.outer.marginsRemoved(marginsForShadow()), rects.radius);
 }
 
 void Selector::paintFadingExpandIcon(QPainter &p, float64 progress) {
@@ -827,6 +849,7 @@ void Selector::paintExpanded(QPainter &p) {
 	} else {
 		paintNonTransparentExpandRect(p, rect() - marginsForShadow());
 	}
+	paintWallpaperBackground(p, rect().marginsRemoved(marginsForShadow()), st::emojiPanRadius);
 }
 
 void Selector::finishExpand() {
@@ -859,11 +882,31 @@ void Selector::paintBubble(QPainter &p, int innerWidth) {
 	const auto bubbleRight = std::min(
 		st::reactStripBubbleRight,
 		(innerWidth - bubble.width()) / 2);
-	bubble.paint(
-		p,
+	const auto position = QPoint(
 		_inner.x() + innerWidth - bubbleRight - bubble.width(),
-		_inner.y() + _inner.height() - _outer.y(),
-		width());
+		_inner.y() + _inner.height() - _outer.y());
+	const auto scope = !dynamic_cast<QWidget*>(p.device()) && Ui::BackgroundRenderOverride
+		? Ui::BackgroundRenderOverride(this,
+			QTransform::fromTranslate(-_outer.x(), -_outer.y())) : nullptr;
+	auto brush = Ui::ResolveBackgroundBrush(p, _st.bg, &_st.bg);
+	if (brush.style() == Qt::TexturePattern) {
+		const auto ratio = devicePixelRatioF();
+		auto mask = QImage(QSize(bubble.width(), bubble.height()) * ratio,
+			QImage::Format_ARGB32_Premultiplied);
+		mask.setDevicePixelRatio(ratio);
+		mask.fill(Qt::transparent);
+		{
+			QPainter q(&mask);
+			bubble.paint(q, 0, 0, bubble.width());
+			q.setCompositionMode(QPainter::CompositionMode_SourceIn);
+			brush.setTransform(brush.transform()
+				* QTransform::fromTranslate(-position.x(), -position.y()));
+			q.fillRect(QRect(QPoint(), QSize(bubble.width(), bubble.height())), brush);
+		}
+		p.drawImage(position, mask);
+	} else {
+		bubble.paint(p, position.x(), position.y(), width());
+	}
 }
 
 void Selector::paintEvent(QPaintEvent *e) {

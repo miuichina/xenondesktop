@@ -292,7 +292,7 @@ void TranslateBar::setup(not_null<History*> history) {
 
 	button->paintRequest(
 	) | rpl::on_next([=](QRect clip) {
-		QPainter(button).fillRect(clip, st::historyComposeButtonBg);
+		Painter(button).fillRect(clip, st::historyComposeButtonBg);
 	}, button->lifetime());
 
 	button->setClickedCallback([=] {

@@ -900,9 +900,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_xenon_blur_effects" = "Blur effects";
 "lng_settings_xenon_realtime_blur" = "Real-time blur";
 "lng_settings_xenon_blur_intensity" = "Blur intensity";
-"lng_settings_xenon_windows_acrylic" = "Windows acrylic blur (WIP)";
-"lng_settings_xenon_windows_acrylic_about" = "Blur windows behind Telegram using Windows Acrylic. Requires Windows 11 22H2 or newer and an app restart.";
-"lng_settings_xenon_windows_background_opacity" = "Interface background opacity";
+"lng_settings_xenon_wallpaper_backdrop" = "Desktop wallpaper background";
+"lng_settings_xenon_wallpaper_backdrop_about" = "Use your desktop wallpaper behind the interface. Windows behind Telegram are not shown.";
+"lng_settings_xenon_wallpaper_blur" = "Wallpaper blur strength";
+"lng_settings_xenon_wallpaper_tint_opacity" = "Wallpaper dimming opacity";
 "lng_settings_xenon_empty" = "Nothing here";
 "lng_settings_xenon_unread_on_top" = "Keep unread chats on top";
 "lng_settings_xenon_unread_on_top_about" = "Chats with unmuted unread messages, marks, mentions and reactions stay right below pinned chats until you read them.";

@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "ui/painter.h"
 #include "history/view/history_view_contact_status.h"
 
 #include "lang/lang_keys.h"
@@ -377,11 +378,11 @@ ContactStatus::Bar::Bar(
 	_emojiStatusInfo->paintRequest(
 	) | rpl::on_next([=, raw = _emojiStatusInfo.data()](QRect clip) {
 		_emojiStatusRepaintScheduled = false;
-		QPainter(raw).fillRect(clip, st::historyComposeButtonBg);
+		Painter(raw).fillRect(clip, st::historyComposeButtonBg);
 	}, lifetime());
 	_botInviteInfo->paintRequest(
 	) | rpl::on_next([raw = _botInviteInfo.data()](QRect clip) {
-		QPainter(raw).fillRect(clip, st::historyComposeButtonBg);
+		Painter(raw).fillRect(clip, st::historyComposeButtonBg);
 	}, lifetime());
 }
 

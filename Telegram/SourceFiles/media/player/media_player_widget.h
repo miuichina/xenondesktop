@@ -53,6 +53,7 @@ public:
 	~Widget();
 
 	void setCloseCallback(Fn<void()> callback);
+	void setupBlurBackground(Fn<void(not_null<Ui::RpWidget*>)> setup);
 	void setShowItemCallback(Fn<void(not_null<const HistoryItem*>)> callback);
 	void stopAndClose();
 	void setShadowGeometryToLeft(int x, int y, int w, int h);

@@ -96,24 +96,30 @@ using Core::WindowPosition;
 	return result;
 }
 
-base::options::toggle OptionWindowsAcrylic({
-	.id = kOptionWindowsAcrylic,
-	.name = "Windows acrylic blur",
+base::options::toggle OptionWallpaperBackdrop({
+	.id = kOptionWallpaperBackdrop,
+	.name = "Desktop wallpaper backdrop",
 	.scope = [] {
 #ifdef Q_OS_WIN
-		return QOperatingSystemVersion::current().microVersion() >= 22621;
+		return true;
 #else
 		return false;
 #endif
 	},
-	.restartRequired = true,
 });
 
-base::options::option<int> OptionWindowsBackgroundOpacity({
-	.id = kOptionWindowsBackgroundOpacity,
-	.name = "Interface background opacity",
+base::options::option<int> OptionWallpaperTintOpacity({
+	.id = kOptionWallpaperTintOpacity,
+	.name = "Wallpaper tint opacity",
 	.defaultValue = 60,
-	.scope = [] { return OptionWindowsAcrylic.relevant(); },
+	.scope = [] { return OptionWallpaperBackdrop.relevant(); },
+});
+
+base::options::option<int> OptionWallpaperBlur({
+	.id = kOptionWallpaperBlur,
+	.name = "Desktop wallpaper blur",
+	.defaultValue = 30,
+	.scope = [] { return OptionWallpaperBackdrop.relevant(); },
 });
 
 base::options::toggle OptionNewWindowsSizeAsFirst({
@@ -428,12 +434,12 @@ QImage WithSmallCounter(QImage image, CounterLayerArgs &&args) {
 	return image;
 }
 
-bool UseWindowsAcrylic() {
-	return OptionWindowsAcrylic.relevant() && OptionWindowsAcrylic.value();
+bool UseWallpaperBackdrop() {
+	return OptionWallpaperBackdrop.relevant() && OptionWallpaperBackdrop.value();
 }
 
 MainWindow::MainWindow(not_null<Controller*> controller)
-: Ui::RpWindow(UseWindowsAcrylic())
+: Ui::RpWindow(false)
 , _controller(controller)
 , _positionUpdatedTimer([=] { savePosition(); })
 , _outdated(Ui::CreateOutdatedBar(body(), cWorkingDir()))

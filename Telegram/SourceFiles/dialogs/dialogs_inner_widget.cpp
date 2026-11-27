@@ -1203,6 +1203,8 @@ void InnerWidget::paint(Painter &p, QRect clip, bool backdrop) {
 			? (row->key() == _chatPreviewRow.key)
 			: selected;
 		const auto cacheAllowed = _rowsScrollCache.scrolling()
+			&& !(Ui::BackgroundUsesDeviceCoordinates
+				&& Ui::BackgroundUsesDeviceCoordinates(this))
 			&& (!videoUserpic || !context.narrow)
 			&& !active
 			&& !cacheSelected
@@ -2137,10 +2139,10 @@ void InnerWidget::paintPeerSearchResult(
 }
 
 QBrush InnerWidget::currentBg() const {
-	return anim::brush(
-		st::dialogsBg,
-		st::dialogsBgOver,
-		_childListShown.current().shown);
+	const auto progress = _childListShown.current().shown;
+	return (progress == 0.)
+		? QBrush(st::dialogsBg)
+		: anim::brush(st::dialogsBg, st::dialogsBgOver, progress);
 }
 
 void InnerWidget::paintSearchTags(

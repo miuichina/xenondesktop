@@ -967,7 +967,7 @@ void AddFilledSkip(not_null<Ui::VerticalLayout*> container) {
 		container,
 		st::settingsPrivacySkipTop));
 	skip->paintRequest() | rpl::on_next([=](QRect clip) {
-		QPainter(skip).fillRect(clip, st::boxBg);
+		Painter(skip).fillRect(clip, st::boxBg);
 	}, skip->lifetime());
 };
 
