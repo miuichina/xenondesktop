@@ -80,6 +80,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/gl/gl_detection.h"
 #include "ui/text/text_options.h"
 #include "ui/effects/spoiler_mess.h"
+#include "ui/effects/text_input_animation.h"
 #include "ui/cached_round_corners.h"
 #include "ui/power_saving.h"
 #include "ui/screen_reader_mode.h"
@@ -349,6 +350,7 @@ void Application::run() {
 	style::StartManager(cScale());
 	Ui::Accessible::Init();
 	Ui::InitTextOptions();
+	Ui::TextInputAnimation::Install();
 	Ui::StartCachedCorners();
 	Ui::Emoji::Init();
 	Ui::PreloadTextSpoilerMask(_lifetime);

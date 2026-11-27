@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_url.h"
 #include "base/event_filter.h"
 #include "ui/chat/chat_style.h"
+#include "ui/effects/text_input_animation.h"
 #include "ui/layers/generic_box.h"
 #include "ui/boxes/calendar_box.h"
 #include "ui/boxes/choose_date_time.h"
@@ -540,6 +541,7 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 		return passed && passed();
 	};
 	const auto field = args.field;
+	Ui::TextInputAnimation::Attach(field);
 	const auto session = args.session;
 	field->setTagMimeProcessor(FieldTagMimeProcessor(
 		session,

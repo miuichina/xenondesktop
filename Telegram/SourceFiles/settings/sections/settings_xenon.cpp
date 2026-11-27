@@ -20,6 +20,7 @@
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "settings/sections/settings_main.h"
+#include "settings/sections/settings_text_animations.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common_session.h"
 #include "ui/boxes/confirm_box.h"
@@ -58,6 +59,13 @@ const auto kMeta = BuildHelper({
 	.title = &tr::lng_settings_xenon,
 	.icon = &st::menuIconStar,
 }, [](SectionBuilder &builder) {
+	builder.addSectionButton({
+		.title = tr::lng_xenon_text_animations(),
+		.targetSection = TextAnimationsId(),
+		.icon = { &st::menuIconChatBubble },
+		.keywords = { u"text"_q, u"animation"_q, u"explosion"_q, u"slide"_q },
+	});
+	builder.addDivider();
 	if (Core::XenonUpdates::Supported()) {
 		builder.addSubsectionTitle({
 			.id = u"xenon/updates"_q,

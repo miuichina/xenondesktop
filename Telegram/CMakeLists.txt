@@ -24,6 +24,11 @@ add_subdirectory(codegen)
 get_filename_component(src_loc SourceFiles REALPATH)
 get_filename_component(res_loc Resources REALPATH)
 
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS WidgetsPrivate)
+set_property(SOURCE ${src_loc}/ui/effects/text_input_animation.cpp APPEND PROPERTY
+    INCLUDE_DIRECTORIES $<TARGET_PROPERTY:Qt${QT_VERSION_MAJOR}::WidgetsPrivate,INTERFACE_INCLUDE_DIRECTORIES>
+)
+
 target_sources(Telegram PRIVATE
     ${src_loc}/ayu/ui/boxes/edit_mark_box.cpp
     ${src_loc}/ayu/ui/boxes/edit_mark_box.h
@@ -2121,6 +2126,8 @@ PRIVATE
     settings/sections/settings_main.h
     settings/sections/settings_xenon.cpp
     settings/sections/settings_xenon.h
+    settings/sections/settings_text_animations.cpp
+    settings/sections/settings_text_animations.h
     settings/settings_recent_searches.cpp
     settings/settings_recent_searches.h
     settings/settings_search.cpp
@@ -2485,6 +2492,8 @@ PRIVATE
     ui/controls/warning_tooltip.h
     ui/effects/animated_string.cpp
     ui/effects/animated_string.h
+    ui/effects/text_input_animation.cpp
+    ui/effects/text_input_animation.h
     ui/effects/credits_graphics.cpp
     ui/effects/credits_graphics.h
     ui/effects/emoji_fly_animation.cpp
